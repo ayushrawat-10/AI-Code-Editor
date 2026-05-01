@@ -1,0 +1,472 @@
+/* =====================================================
+   Global Reset & Base
+   ===================================================== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-deep:       #0d0f13;
+  --bg-sidebar:    #13161d;
+  --bg-editor:     #1e2128;
+  --bg-terminal:   #12151a;
+  --bg-header:     #161921;
+  --accent:        #7c6ff5;
+  --accent-hover:  #9a90f8;
+  --accent-glow:   rgba(124, 111, 245, 0.25);
+  --green:         #3ddc84;
+  --red:           #ff6b6b;
+  --yellow:        #ffd166;
+  --text-primary:  #e8eaf0;
+  --text-muted:    #6b7280;
+  --border:        #2a2d38;
+  --run-btn:       #3ddc84;
+  --run-btn-hover: #52e89a;
+  --run-glow:      rgba(61, 220, 132, 0.3);
+  --font-ui:       'Inter', sans-serif;
+  --font-mono:     'JetBrains Mono', 'Fira Code', monospace;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+}
+
+/* =====================================================
+   App Shell
+   ===================================================== */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-deep);
+}
+
+/* =====================================================
+   Top Header / Toolbar
+   ===================================================== */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 52px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 16px;
+  z-index: 10;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-logo {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, var(--accent), #5b8dee);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.app-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+.app-title span {
+  color: var(--accent);
+}
+
+.header-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 14px;
+  background: var(--bg-editor);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.tab-item.active {
+  color: var(--text-primary);
+  background: var(--bg-editor);
+  border-color: var(--accent);
+  border-bottom-color: var(--bg-editor);
+}
+
+.tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lang-badge {
+  padding: 3px 10px;
+  background: rgba(124, 111, 245, 0.12);
+  border: 1px solid rgba(124, 111, 245, 0.3);
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  letter-spacing: 0.05em;
+}
+
+/* =====================================================
+   Run Button
+   ===================================================== */
+.run-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 18px;
+  background: var(--run-btn);
+  color: #0d1f12;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease;
+  letter-spacing: 0.02em;
+}
+
+.run-btn:hover {
+  background: var(--run-btn-hover);
+  box-shadow: 0 0 18px var(--run-glow);
+}
+
+.run-btn:active {
+  transform: scale(0.96);
+}
+
+.run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.run-btn.running {
+  background: var(--yellow);
+}
+
+.run-icon {
+  font-size: 11px;
+}
+
+/* =====================================================
+   Main Workspace (Editor + Terminal column)
+   ===================================================== */
+.workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* =====================================================
+   Activity Bar (thin left strip, optional flair)
+   ===================================================== */
+.activity-bar {
+  width: 46px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.activity-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  font-size: 15px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.activity-icon:hover,
+.activity-icon.active {
+  background: rgba(124, 111, 245, 0.12);
+  color: var(--accent);
+}
+
+/* =====================================================
+   Editor + Terminal (vertical split)
+   ===================================================== */
+.editor-terminal-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* =====================================================
+   Editor Section
+   ===================================================== */
+.editor-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-editor);
+  min-height: 0;
+}
+
+.editor-gutter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.editor-gutter-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.editor-breadcrumb {
+  color: var(--text-muted);
+}
+
+.editor-breadcrumb .file-name {
+  color: var(--text-primary);
+}
+
+.editor-wrapper {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* =====================================================
+   Terminal Section
+   ===================================================== */
+.terminal-section {
+  height: 220px;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-terminal);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 34px;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.terminal-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.terminal-tab {
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+  font-family: var(--font-ui);
+  font-weight: 500;
+  transition: color 0.15s;
+}
+
+.terminal-tab.active {
+  color: var(--text-primary);
+  background: var(--bg-terminal);
+}
+
+.terminal-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.terminal-ctrl-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  line-height: 1;
+}
+
+.terminal-ctrl-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.06);
+}
+
+.terminal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 18px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+.terminal-body::-webkit-scrollbar {
+  width: 6px;
+}
+.terminal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-body::-webkit-scrollbar-thumb {
+  background: #2a2d38;
+  border-radius: 3px;
+}
+
+.terminal-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.terminal-prompt {
+  color: var(--accent);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.terminal-output {
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-output.success {
+  color: var(--green);
+}
+
+.terminal-output.error {
+  color: var(--red);
+}
+
+.terminal-output.info {
+  color: var(--text-muted);
+}
+
+.terminal-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Blinking cursor in terminal */
+.terminal-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 13px;
+  background: var(--accent);
+  vertical-align: middle;
+  margin-left: 2px;
+  border-radius: 1px;
+  animation: blink 1.1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* =====================================================
+   Status Bar (bottom strip)
+   ===================================================== */
+.status-bar {
+  height: 24px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 18px;
+  flex-shrink: 0;
+}
+
+.status-item {
+  font-size: 11px;
+  color: rgba(255,255,255,0.85);
+  font-family: var(--font-ui);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: default;
+}
+
+.status-right {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+}
