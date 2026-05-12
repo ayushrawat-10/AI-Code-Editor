@@ -5,6 +5,14 @@ import "./App.css";
 const BACKEND_URL = "http://localhost:8000";
 const SUGGEST_DEBOUNCE_MS = 1500; // send to backend 1.5s after user stops typing
 
+// Strip residual markdown fences the model sometimes returns
+function cleanSuggestion(raw) {
+  return raw
+    .replace(/^```[\w]*\n?/m, "")
+    .replace(/```$/m, "")
+    .trim();
+}
+
 // Default Python starter code
 const DEFAULT_CODE = `# Welcome to AI Code Editor 🚀
 # Start writing Python code below
@@ -18,12 +26,14 @@ greet("World")
 function App() {
   const [code, setCode] = useState(DEFAULT_CODE);
   const [isRunning, setIsRunning] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);  // true while sending to /suggest
+  const [isSyncing, setIsSyncing] = useState(false);   // true while waiting for /suggest
+  const [suggestion, setSuggestion] = useState("");     // latest AI suggestion
   const [terminalLines, setTerminalLines] = useState([
     { type: "info", text: "Terminal ready. Click Run to execute your code." },
   ]);
   const terminalBodyRef = useRef(null);
   const debounceTimer = useRef(null);
+  const editorRef = useRef(null);
 
   // ── Auto-scroll terminal ──
   useEffect(() => {
@@ -32,16 +42,21 @@ function App() {
     }
   }, [terminalLines]);
 
-  // ── Send code to backend 1.5s after user stops typing ──
+  // ── Send code to backend and store the AI suggestion ──
   const sendToBackend = useCallback(async (currentCode) => {
+    setSuggestion("");   // clear old suggestion while loading
     setIsSyncing(true);
     try {
-      await fetch(`${BACKEND_URL}/suggest`, {
+      const res = await fetch(`${BACKEND_URL}/suggest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: currentCode }),
       });
-      // Response ignored for now — backend just prints it
+      if (res.ok) {
+        const data = await res.json();
+        const clean = cleanSuggestion(data.suggestion ?? "");
+        if (clean) setSuggestion(clean);
+      }
     } catch {
       // Backend might not be running yet; fail silently
     } finally {
@@ -49,9 +64,33 @@ function App() {
     }
   }, []);
 
+  // ── Accept suggestion: append it to current code ──
+  const acceptSuggestion = useCallback(() => {
+    if (!suggestion) return;
+    setCode((prev) => {
+      const separator = prev.endsWith("\n") ? "" : "\n";
+      return prev + separator + suggestion;
+    });
+    setSuggestion("");
+  }, [suggestion]);
+
+  // ── Tab key in editor accepts the suggestion ──
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Tab" && suggestion) {
+        e.preventDefault();
+        acceptSuggestion();
+      }
+      if (e.key === "Escape") setSuggestion("");
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [suggestion, acceptSuggestion]);
+
   const handleCodeChange = (value) => {
     const newCode = value ?? "";
     setCode(newCode);
+    setSuggestion("");  // clear stale suggestion on new keystrokes
 
     // Reset debounce timer on every keystroke
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -154,7 +193,15 @@ function App() {
                   workspace / <span className="file-name">main.py</span>
                 </span>
               </div>
-              <span>{code.split("\n").length} lines</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {isSyncing && (
+                  <span className="ai-thinking-badge">
+                    <span className="ai-dot" />
+                    AI thinking…
+                  </span>
+                )}
+                <span>{code.split("\n").length} lines</span>
+              </div>
             </div>
 
             <div className="editor-wrapper">
@@ -165,8 +212,52 @@ function App() {
                 value={code}
                 onChange={handleCodeChange}
                 options={editorOptions}
+                onMount={(editor) => { editorRef.current = editor; }}
               />
             </div>
+
+            {/* ── AI Suggestion Panel ── */}
+            {(suggestion || isSyncing) && (
+              <div className="ai-suggestion-panel" role="complementary" aria-label="AI Suggestion">
+                <div className="ai-panel-header">
+                  <span className="ai-panel-title">
+                    <span className="ai-sparkle">✦</span> AI Suggestion
+                  </span>
+                  <div className="ai-panel-actions">
+                    {suggestion && (
+                      <>
+                        <button
+                          id="accept-suggestion-btn"
+                          className="ai-accept-btn"
+                          onClick={acceptSuggestion}
+                          title="Accept (Tab)"
+                        >
+                          Accept <kbd>Tab</kbd>
+                        </button>
+                        <button
+                          id="dismiss-suggestion-btn"
+                          className="ai-dismiss-btn"
+                          onClick={() => setSuggestion("")}
+                          title="Dismiss (Esc)"
+                        >
+                          Dismiss <kbd>Esc</kbd>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="ai-panel-body">
+                  {isSyncing && !suggestion ? (
+                    <div className="ai-loading">
+                      <span className="ai-shimmer" />
+                      <span className="ai-shimmer short" />
+                    </div>
+                  ) : (
+                    <pre className="ai-code-preview">{suggestion}</pre>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Terminal section */}

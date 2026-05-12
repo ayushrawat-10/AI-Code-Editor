@@ -470,3 +470,181 @@ body {
   display: flex;
   gap: 14px;
 }
+
+/* =====================================================
+   AI Thinking Badge (in editor gutter)
+   ===================================================== */
+.ai-thinking-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  animation: fadeIn 0.3s ease;
+}
+
+.ai-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-dot 1s infinite;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* =====================================================
+   AI Suggestion Panel
+   ===================================================== */
+.ai-suggestion-panel {
+  border-top: 1px solid rgba(124, 111, 245, 0.35);
+  background: linear-gradient(180deg, rgba(20,18,40,0.96) 0%, rgba(14,13,30,0.98) 100%);
+  backdrop-filter: blur(12px);
+  flex-shrink: 0;
+  max-height: 220px;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 -4px 24px rgba(124, 111, 245, 0.12);
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.ai-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(124, 111, 245, 0.15);
+  flex-shrink: 0;
+}
+
+.ai-panel-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-sparkle {
+  font-size: 13px;
+  animation: sparkle 2s ease-in-out infinite;
+}
+
+@keyframes sparkle {
+  0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); }
+  50%       { opacity: 0.7; transform: scale(1.15) rotate(15deg); }
+}
+
+.ai-panel-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-accept-btn,
+.ai-dismiss-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ai-accept-btn {
+  background: rgba(61, 220, 132, 0.15);
+  border: 1px solid rgba(61, 220, 132, 0.4);
+  color: var(--green);
+}
+
+.ai-accept-btn:hover {
+  background: rgba(61, 220, 132, 0.25);
+  box-shadow: 0 0 12px rgba(61, 220, 132, 0.2);
+}
+
+.ai-dismiss-btn {
+  background: rgba(255, 107, 107, 0.08);
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  color: var(--red);
+}
+
+.ai-dismiss-btn:hover {
+  background: rgba(255, 107, 107, 0.15);
+}
+
+kbd {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.ai-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 18px;
+}
+
+.ai-panel-body::-webkit-scrollbar { width: 4px; }
+.ai-panel-body::-webkit-scrollbar-thumb { background: rgba(124,111,245,0.3); border-radius: 2px; }
+
+/* Ghost-text-style code preview */
+.ai-code-preview {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: rgba(200, 195, 255, 0.7);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Shimmer loading effect */
+.ai-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.ai-shimmer {
+  display: block;
+  height: 12px;
+  border-radius: 4px;
+  width: 75%;
+  background: linear-gradient(90deg,
+    rgba(124,111,245,0.08) 0%,
+    rgba(124,111,245,0.2) 40%,
+    rgba(124,111,245,0.08) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+
+.ai-shimmer.short { width: 45%; animation-delay: 0.2s; }
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
