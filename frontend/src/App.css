@@ -500,7 +500,34 @@ body {
 }
 
 /* =====================================================
-   AI Suggestion Panel
+   AI Ready Badge (suggestion available)
+   ===================================================== */
+.ai-ready-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--green);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  animation: fadeIn 0.25s ease;
+  padding: 3px 10px;
+  background: rgba(61, 220, 132, 0.08);
+  border: 1px solid rgba(61, 220, 132, 0.25);
+  border-radius: 20px;
+}
+
+.ai-ready-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse-dot 1s infinite;
+}
+
+/* =====================================================
+   AI Suggestion Panel (legacy — kept for reference)
    ===================================================== */
 .ai-suggestion-panel {
   border-top: 1px solid rgba(124, 111, 245, 0.35);
@@ -647,4 +674,21 @@ kbd {
 @keyframes shimmer {
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* =====================================================
+   Ghost Text Decorations (Cursor-style inline hint)
+   ===================================================== */
+
+/* Ghost text ContentWidget — Monaco positions this DOM element at the cursor.
+   Since it's our own node, we have full CSS control (no Monaco specificity wars). */
+.ghost-content-widget {
+  color: rgba(180, 170, 245, 0.55);
+  font-style: italic;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  pointer-events: none;
+  user-select: none;
+  white-space: pre;
 }
