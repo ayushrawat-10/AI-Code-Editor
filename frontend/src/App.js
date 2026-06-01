@@ -12,6 +12,18 @@ function cleanSuggestion(raw) {
     .trim();
 }
 
+// ── Suffix-prefix overlap matching helper ──────────────────────────────────
+function getOverlapLength(linePrefix, suggestion) {
+  const maxPossibleOverlap = Math.min(linePrefix.length, suggestion.length);
+  for (let len = maxPossibleOverlap; len > 0; len--) {
+    const suffix = linePrefix.slice(-len);
+    if (suggestion.startsWith(suffix)) {
+      return len;
+    }
+  }
+  return 0;
+}
+
 // ── Default starter code ─────────────────────────────────────────────────────
 const DEFAULT_CODE = `# Welcome to AI Code Editor 🚀
 # Start writing Python code below
@@ -183,13 +195,19 @@ function App() {
     // Clear decorations before inserting so they don't shift
     clearGhost();
 
-    // Insert the suggestion text at the current cursor position
+    // Calculate overlap to replace correct range
+    const lineContent = model.getLineContent(pos.lineNumber);
+    const linePrefix = lineContent.slice(0, pos.column - 1);
+    const overlap = getOverlapLength(linePrefix, text);
+    const startColumn = pos.column - overlap;
+
+    // Insert/replace suggestion text using correct start column
     const eol = model.getEOL();
     editor.executeEdits("ghost-accept", [
       {
         range: {
           startLineNumber: pos.lineNumber,
-          startColumn: pos.column,
+          startColumn: startColumn,
           endLineNumber: pos.lineNumber,
           endColumn: pos.column,
         },
@@ -198,13 +216,13 @@ function App() {
       },
     ]);
 
-    // Move cursor to end of inserted text
+    // Move cursor precisely to the end of the inserted suggestion
     const insertLines = text.split(eol === "\r\n" ? "\r\n" : "\n");
     const newLineNum = pos.lineNumber + insertLines.length - 1;
     const lastLine = insertLines[insertLines.length - 1];
     const newCol =
       insertLines.length === 1
-        ? pos.column + text.length
+        ? startColumn + text.length
         : lastLine.length + 1;
 
     editor.setPosition({ lineNumber: newLineNum, column: newCol });
@@ -299,11 +317,18 @@ function App() {
           provideInlineCompletions(model, position) {
             const ghost = ghostTextRef.current;
             if (!ghost) return { items: [] };
+
+            // Calculate overlap range to replace partial text
+            const lineContent = model.getLineContent(position.lineNumber);
+            const linePrefix = lineContent.slice(0, position.column - 1);
+            const overlap = getOverlapLength(linePrefix, ghost);
+            const startColumn = position.column - overlap;
+
             return {
               items: [{
                 insertText: ghost,
                 range: new monaco.Range(
-                  position.lineNumber, position.column,
+                  position.lineNumber, startColumn,
                   position.lineNumber, position.column,
                 ),
               }],
