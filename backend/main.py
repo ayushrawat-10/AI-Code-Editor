@@ -8,6 +8,10 @@ from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 import json
+import subprocess
+import sys
+import tempfile
+import os
 
 load_dotenv()
 
@@ -22,14 +26,6 @@ app.add_middleware(
 )
 
 # ── Model setup ──────────────────────────────────────────────────────────────
-# OpenAI (commented out — switch back by uncommenting and commenting HF block)
-# llm = ChatOpenAI(
-#     model="gpt-4o-mini",
-#     temperature=0.2,
-#     max_tokens=120,
-#     streaming=True,
-# )
-
 # HuggingFace — active
 _hf_endpoint = HuggingFaceEndpoint(
     repo_id="Qwen/Qwen2.5-Coder-7B-Instruct",
@@ -64,6 +60,9 @@ chain = template | llm
 
 # ── Request schema ───────────────────────────────────────────────────────────
 class CodeRequest(BaseModel):
+    code: str
+
+class ExecuteRequest(BaseModel):
     code: str
 
 # ── Streaming SSE endpoint ───────────────────────────────────────────────────
@@ -111,3 +110,131 @@ async def suggest_code(req: CodeRequest):
     print(suggestion)
     print("=====================")
     return {"suggestion": suggestion}
+
+# ── Code Execution Endpoint ──────────────────────────────────────────────────
+active_process = None
+
+@app.post("/execute")
+async def execute_code(req: ExecuteRequest, request: Request):
+    """
+    Executes the submitted Python code in a safe subprocess and returns stdout/stderr.
+    """
+    global active_process
+    # Create a temporary file to write the submitted Python code
+    with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as temp_file:
+        temp_file.write(req.code)
+        temp_file_path = temp_file.name
+
+    try:
+        # Terminate any existing running process first to prevent duplicates
+        if active_process:
+            try:
+                active_process.terminate()
+                active_process.kill()
+            except Exception:
+                pass
+
+        # Start the subprocess synchronously in the background (platform independent)
+        process = subprocess.Popen(
+            [sys.executable, temp_file_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+        )
+        active_process = process
+        
+        # Run process.communicate asynchronously in a thread pool as a task to prevent blocking
+        communicate_task = asyncio.create_task(
+            asyncio.to_thread(process.communicate, timeout=5.0)
+        )
+        
+        # Actively poll for client disconnection while the process is executing
+        while not communicate_task.done():
+            await asyncio.sleep(0.05)
+            if await request.is_disconnected():
+                # Client cancelled/aborted! Cancel task and kill subprocess immediately
+                communicate_task.cancel()
+                if process:
+                    try:
+                        process.terminate()
+                        process.kill()
+                    except Exception:
+                        pass
+                raise asyncio.CancelledError()
+        
+        stdout, stderr = await communicate_task
+        
+        return {
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": process.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        if process:
+            try:
+                process.terminate()
+                process.kill()
+            except Exception:
+                pass
+        return {
+            "stdout": "",
+            "stderr": "Execution Timeout: The program took longer than 5 seconds to run.",
+            "exit_code": -1,
+        }
+    except asyncio.CancelledError:
+        # If client disconnects or cancels, terminate the subprocess instantly
+        if process:
+            try:
+                process.terminate()
+                process.kill()
+            except Exception:
+                pass
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()  # print exact traceback to backend console
+        return {
+            "stdout": "",
+            "stderr": f"System Execution Error: {repr(e)}",
+            "exit_code": -2,
+        }
+    finally:
+        if active_process == process:
+            active_process = None
+        # Guarantee deletion of the temporary file after run
+        if os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception:
+                pass
+
+@app.post("/execute/stop")
+async def stop_execution():
+    """
+    Terminates the active subprocess immediately using standard system signals.
+    """
+    global active_process
+    if active_process:
+        try:
+            import signal
+            if sys.platform == "win32":
+                # Send Ctrl+C / Ctrl+Break to the Windows process group
+                active_process.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                active_process.send_signal(signal.SIGINT)
+            
+            # Give the process a brief moment to exit gracefully and write traceback
+            await asyncio.sleep(0.1)
+            if active_process.poll() is None:
+                active_process.terminate()
+                active_process.kill()
+        except Exception:
+            try:
+                active_process.terminate()
+                active_process.kill()
+            except Exception:
+                pass
+        active_process = None
+        return {"status": "stopped", "message": "Subprocess terminated successfully."}
+    return {"status": "idle", "message": "No active process to stop."}

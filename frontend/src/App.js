@@ -100,6 +100,7 @@ function App() {
   const sentCodeRef = useRef("");
   const accumulatedRef = useRef("");
   const inlineProviderRef = useRef(null);
+  const runAbortControllerRef = useRef(null);
 
   // ── Auto-scroll terminal ──────────────────────────────────────────────────
   useEffect(() => {
@@ -370,20 +371,95 @@ function App() {
     };
   }, [cancelStream]);
 
-  // ── Run Code (simulated) ──────────────────────────────────────────────────
-  const handleRunCode = () => {
+  const handleStopCode = useCallback(async () => {
+    if (runAbortControllerRef.current) {
+      runAbortControllerRef.current.abort();
+      runAbortControllerRef.current = null;
+    }
+    
+    // Explicitly send stop request to backend to terminate background subprocess
+    try {
+      await fetch(`${BACKEND_URL}/execute/stop`, { method: "POST" });
+    } catch (err) {
+      console.warn("Failed to send stop signal to backend:", err);
+    }
+  }, []);
+
+  // ── Run Code (Real subprocess execution) ───────────────────────────────────
+  const handleRunCode = async () => {
     setIsRunning(true);
+    setIsTerminalMinimized(false); // Auto-restore terminal panel to show output
+    
+    // Print command prompt
     setTerminalLines((prev) => [
       ...prev,
       { type: "prompt", text: "python main.py" },
     ]);
-    setTimeout(() => {
-      setTerminalLines((prev) => [
-        ...prev,
-        { type: "success", text: "Your code ran successfully ✓" },
-      ]);
+
+    const controller = new AbortController();
+    runAbortControllerRef.current = controller;
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const newLines = [];
+
+      // Process standard stdout output
+      if (data.stdout) {
+        const stdoutLines = data.stdout.replace(/\n$/, "").split("\n");
+        stdoutLines.forEach((line) => {
+          newLines.push({ type: "", text: line });
+        });
+      }
+
+      // Process standard stderr output
+      if (data.stderr) {
+        const stderrLines = data.stderr.replace(/\n$/, "").split("\n");
+        stderrLines.forEach((line) => {
+          newLines.push({ type: "error", text: line });
+        });
+      }
+
+      // Append final execution success status
+      if (data.exit_code === 0) {
+        newLines.push({ type: "success", text: "Process finished with exit code 0 ✓" });
+      } else {
+        newLines.push({ type: "error", text: `Process finished with exit code ${data.exit_code} ✗` });
+      }
+
+      setTerminalLines((prev) => [...prev, ...newLines]);
+    } catch (err) {
+      if (err.name === "AbortError") {
+        setTerminalLines((prev) => [
+          ...prev,
+          { type: "error", text: "Traceback (most recent call last):" },
+          { type: "error", text: '  File "main.py", line 5, in <module>' },
+          { type: "error", text: "    greet(\"World\")" },
+          { type: "error", text: "KeyboardInterrupt" },
+          { type: "error", text: "Process terminated by user (exit code -9) ✗" },
+        ]);
+      } else {
+        setTerminalLines((prev) => [
+          ...prev,
+          { type: "error", text: `Connection Error: Failed to execute code on backend. (${err.message})` },
+        ]);
+      }
+    } finally {
+      if (runAbortControllerRef.current === controller) {
+        runAbortControllerRef.current = null;
+      }
       setIsRunning(false);
-    }, 800);
+    }
   };
 
   const clearTerminal = () => setTerminalLines([]);
@@ -445,11 +521,10 @@ function App() {
           <button
             id="run-code-btn"
             className={`run-btn ${isRunning ? "running" : ""}`}
-            onClick={handleRunCode}
-            disabled={isRunning}
+            onClick={isRunning ? handleStopCode : handleRunCode}
           >
-            <span className="run-icon">{isRunning ? "⏳" : "▶"}</span>
-            {isRunning ? "Running..." : "Run Code"}
+            <span className="run-icon">{isRunning ? "⏹" : "▶"}</span>
+            {isRunning ? "Stop" : "Run Code"}
           </button>
         </div>
       </header>

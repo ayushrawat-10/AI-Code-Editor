@@ -193,7 +193,13 @@ body {
 }
 
 .run-btn.running {
-  background: var(--yellow);
+  background: var(--red);
+  color: #fff;
+}
+
+.run-btn.running:hover {
+  background: #ff8585;
+  box-shadow: 0 0 18px rgba(255, 107, 107, 0.45);
 }
 
 .run-icon {
