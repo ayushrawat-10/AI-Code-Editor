@@ -329,3 +329,76 @@ async def stop_execution():
         active_process = None
         return {"status": "stopped", "message": "Subprocess terminated successfully."}
     return {"status": "idle", "message": "No active process to stop."}
+
+
+# ── AI Chat Assistant Endpoint ───────────────────────────────────────────────
+class ChatRequest(BaseModel):
+    message: str
+    code: str
+    filename: str = "main.py"
+
+chat_template = PromptTemplate(
+    template="""You are a professional software engineering assistant. You help the user write, debug, explain, and optimize their code.
+
+Active Context:
+File name: {filename}
+Current file contents:
+```
+{code}
+```
+
+Instructions:
+Answer the user's question about their code or software engineering query. If they ask to write or modify code, provide the updated code snippets clearly. Keep your response concise, helpful, and professional. Do not use generic filler text.
+
+User Question:
+{message}
+
+Assistant Response:
+""",
+    input_variables=["code", "filename", "message"]
+)
+
+chat_chain = chat_template | llm
+
+@app.post("/chat")
+async def chat_with_ai(req: ChatRequest):
+    """Answers a user's question regarding the active code context."""
+    try:
+        response = await asyncio.to_thread(
+            chat_chain.invoke, 
+            {"code": req.code, "filename": req.filename, "message": req.message}
+        )
+        return {"response": response.content.strip()}
+    except Exception as e:
+        return {"response": f"AI Chat Error: Failed to generate response ({str(e)})"}
+
+
+@app.post("/chat/stream")
+async def chat_with_ai_stream(req: ChatRequest):
+    """Answers a user's question regarding the active code context with streaming response."""
+    async def token_generator():
+        collected = []
+        try:
+            async for chunk in chat_chain.astream({
+                "code": req.code,
+                "filename": req.filename,
+                "message": req.message
+            }):
+                token = chunk.content
+                if token:
+                    collected.append(token)
+                    payload = json.dumps({"token": token})
+                    yield f"data: {payload}\n\n"
+            full = "".join(collected).strip()
+            yield f"data: {json.dumps({'done': True, 'full': full})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        token_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

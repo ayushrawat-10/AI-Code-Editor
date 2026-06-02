@@ -188,6 +188,21 @@ function App() {
   const [terminalHeight, setTerminalHeight] = useState(220);
   const [isDraggingTerminal, setIsDraggingTerminal] = useState(false);
 
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState([
+    { role: "assistant", content: "Hello! I am your AI assistant. Ask me anything about your current code file!" }
+  ]);
+  const [chatInputValue, setChatInputValue] = useState("");
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const chatBodyRef = useRef(null);
+
+  // Auto-scroll chat body
+  useEffect(() => {
+    if (chatBodyRef.current) {
+      chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+    }
+  }, [chatMessages, isChatOpen]);
+
   const handleResizerMouseDown = useCallback((e) => {
     e.preventDefault();
     setIsDraggingTerminal(true);
@@ -247,6 +262,106 @@ function App() {
       ]);
     });
   }, [activeFile]);
+
+  const handleSendChatMessage = useCallback(async (e) => {
+    if (e) e.preventDefault();
+    const query = chatInputValue.trim();
+    if (!query || isChatLoading) return;
+
+    // Append user message
+    setChatMessages(prev => [...prev, { role: "user", content: query }]);
+    setChatInputValue("");
+    setIsChatLoading(true);
+
+    let hasStartedAssistantMessage = false;
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/chat/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: query,
+          code: currentCodeRef.current,
+          filename: activeFile || "main.py"
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); // keep incomplete last line
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.token) {
+              if (!hasStartedAssistantMessage) {
+                // First token received! Turn off loading dots, start assistant message
+                setIsChatLoading(false);
+                hasStartedAssistantMessage = true;
+                setChatMessages(prev => [...prev, { role: "assistant", content: data.token }]);
+              } else {
+                // Append subsequent tokens to the last assistant message
+                setChatMessages(prev => {
+                  if (prev.length === 0) return prev;
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...last,
+                      content: last.content + data.token
+                    };
+                  }
+                  return updated;
+                });
+              }
+            }
+            if (data.done) {
+              return;
+            }
+            if (data.error) {
+              throw new Error(data.error);
+            }
+          } catch (jsonErr) {
+            // ignore malformed lines
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Chat stream error:", err);
+      setIsChatLoading(false);
+      if (hasStartedAssistantMessage) {
+        setChatMessages(prev => {
+          if (prev.length === 0) return prev;
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last.role === "assistant") {
+            updated[updated.length - 1] = {
+              ...last,
+              content: last.content + `\n\n[Chat Stream Error: ${err.message}]`
+            };
+          }
+          return updated;
+        });
+      } else {
+        setChatMessages(prev => [...prev, { role: "assistant", content: `Failed to fetch response: ${err.message}` }]);
+      }
+    } finally {
+      setIsChatLoading(false);
+    }
+  }, [chatInputValue, isChatLoading, activeFile]);
 
   // ── Auto-scroll terminal ──────────────────────────────────────────────────
   useEffect(() => {
@@ -932,6 +1047,14 @@ function App() {
             </span>
           )}
           <span className="lang-badge">{getLanguageLabel(activeFile)}</span>
+          <button 
+            className={`header-action-btn chat-toggle ${isChatOpen ? "active" : ""}`}
+            onClick={() => setIsChatOpen(prev => !prev)}
+            title="Toggle AI Assistant Chat Pane"
+            style={{ marginLeft: 8 }}
+          >
+            <span className="btn-icon">✨</span> AI Chat
+          </button>
         </div>
       </header>
 
@@ -1162,6 +1285,78 @@ function App() {
             </div>
           </section>
         </div>
+
+        {/* AI Assistant Chat Sidebar */}
+        {isChatOpen && (
+          <aside className="ai-chat-sidebar">
+            <div className="chat-header">
+              <div className="chat-header-title">
+                <span className="chat-header-sparkle">✨</span>
+                AI ASSISTANT
+              </div>
+              <div className="chat-header-actions">
+                <span className="chat-action-dot" title="History">🕒</span>
+                <span className="chat-action-dot" title="Options">⋯</span>
+                <button 
+                  className="chat-close-btn"
+                  onClick={() => setIsChatOpen(false)}
+                  title="Close Assistant"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="chat-messages-body" ref={chatBodyRef}>
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`chat-message-row ${msg.role}`}>
+                  <div className={`chat-bubble ${msg.role}`}>
+                    {msg.role === "assistant" && (
+                      <div className="chat-bubble-avatar">🤖</div>
+                    )}
+                    <div className="chat-bubble-content">
+                      {msg.content.split("\n").map((line, idx) => (
+                        <p key={idx} style={{ margin: "2px 0" }}>{line}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {isChatLoading && (
+                <div className="chat-message-row assistant">
+                  <div className="chat-bubble assistant loading">
+                    <div className="chat-bubble-avatar">🤖</div>
+                    <div className="chat-loading-dots">
+                      <span>.</span><span>.</span><span>.</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <form className="chat-input-container" onSubmit={handleSendChatMessage}>
+              <input
+                type="text"
+                className="chat-input"
+                value={chatInputValue}
+                onChange={(e) => setChatInputValue(e.target.value)}
+                placeholder="Ask anything about your code..."
+                disabled={isChatLoading}
+              />
+              <button 
+                type="submit" 
+                className="chat-send-btn" 
+                disabled={!chatInputValue.trim() || isChatLoading}
+                title="Send Message"
+              >
+                ➔
+              </button>
+            </form>
+            <div className="chat-footer-note">
+              AI can make mistakes. Check important info.
+            </div>
+          </aside>
+        )}
       </div>
 
       {/* ── Status Bar ── */}
