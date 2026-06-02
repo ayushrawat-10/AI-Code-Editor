@@ -37,13 +37,52 @@ greet("World")
 // ── Global abort controller so we can cancel in-flight streams ───────────────
 let activeAbortController = null;
 
+// ── Language mapping utilities ────────────────────────────────────────────────
+function getLanguageFromExtension(fileName) {
+  if (!fileName) return "python";
+  const ext = fileName.split(".").pop().toLowerCase();
+  switch (ext) {
+    case "py": return "python";
+    case "cpp":
+    case "cc":
+    case "cxx":
+    case "h":
+    case "hpp":
+      return "cpp";
+    case "c": return "c";
+    case "html":
+    case "htm":
+      return "html";
+    case "js":
+    case "jsx":
+      return "javascript";
+    case "css": return "css";
+    case "rs": return "rust";
+    default: return "python";
+  }
+}
+
+function getLanguageLabel(fileName) {
+  const lang = getLanguageFromExtension(fileName);
+  switch (lang) {
+    case "python": return "Python 3";
+    case "cpp": return "C++";
+    case "c": return "C";
+    case "html": return "HTML5";
+    case "javascript": return "JavaScript";
+    case "css": return "CSS3";
+    case "rust": return "Rust";
+    default: return "Python 3";
+  }
+}
+
 // ── Stream a suggestion from the backend, calling onToken for each chunk ─────
-async function streamSuggestion(code, onToken, onDone, signal) {
+async function streamSuggestion(code, filename, onToken, onDone, signal) {
   try {
     const response = await fetch(`${BACKEND_URL}/suggest/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, filename }),
       signal,
     });
 
@@ -109,7 +148,7 @@ function App() {
   const currentCodeRef = useRef(DEFAULT_CODE);
   const sentCodeRef = useRef("");
   const accumulatedRef = useRef("");
-  const inlineProviderRef = useRef(null);
+  const inlineProviderRef = useRef([]);
   const runAbortControllerRef = useRef(null);
   const isCreatingFileCancelingRef = useRef(false);
   const isRenameCancelingRef = useRef(false);
@@ -281,6 +320,7 @@ function App() {
 
     streamSuggestion(
       currentCode,
+      activeFile,
       (token) => {
         accumulatedRef.current += token;
         const cleaned = cleanSuggestion(accumulatedRef.current);
@@ -294,7 +334,7 @@ function App() {
       },
       controller.signal,
     );
-  }, [cancelStream, applyGhost]);
+  }, [cancelStream, applyGhost, activeFile]);
 
   // ── Handle editor text change ─────────────────────────────────────────────
   const handleCodeChange = useCallback((value) => {
@@ -492,36 +532,37 @@ function App() {
       editorRef.current = editor;
       monacoRef.current = monaco;
 
-      // Register Monaco's native inline completions provider.
-      // Monaco calls provideInlineCompletions on every model change (keystroke),
-      // which is when ghost text needs to appear anyway.
-      const provider = monaco.languages.registerInlineCompletionsProvider(
-        { language: "python" },
-        {
-          provideInlineCompletions(model, position) {
-            const ghost = ghostTextRef.current;
-            if (!ghost) return { items: [] };
+      // Register Monaco's native inline completions provider for all supported languages.
+      const SUPPORTED_LANGUAGES = ["python", "cpp", "c", "html", "javascript", "css", "rust"];
+      const providers = SUPPORTED_LANGUAGES.map(lang => 
+        monaco.languages.registerInlineCompletionsProvider(
+          { language: lang },
+          {
+            provideInlineCompletions(model, position) {
+              const ghost = ghostTextRef.current;
+              if (!ghost) return { items: [] };
 
-            // Calculate overlap range to replace partial text
-            const lineContent = model.getLineContent(position.lineNumber);
-            const linePrefix = lineContent.slice(0, position.column - 1);
-            const overlap = getOverlapLength(linePrefix, ghost);
-            const startColumn = position.column - overlap;
+              // Calculate overlap range to replace partial text
+              const lineContent = model.getLineContent(position.lineNumber);
+              const linePrefix = lineContent.slice(0, position.column - 1);
+              const overlap = getOverlapLength(linePrefix, ghost);
+              const startColumn = position.column - overlap;
 
-            return {
-              items: [{
-                insertText: ghost,
-                range: new monaco.Range(
-                  position.lineNumber, startColumn,
-                  position.lineNumber, position.column,
-                ),
-              }],
-            };
-          },
-          freeInlineCompletions() { },
-        },
+              return {
+                items: [{
+                  insertText: ghost,
+                  range: new monaco.Range(
+                    position.lineNumber, startColumn,
+                    position.lineNumber, position.column,
+                  ),
+                }],
+              };
+            },
+            freeInlineCompletions() { },
+          }
+        )
       );
-      inlineProviderRef.current = provider;
+      inlineProviderRef.current = providers;
 
       // Tab → accept our suggestion (works even if Monaco hasn't shown ghost text yet)
       editor.onKeyDown((e) => {
@@ -549,7 +590,7 @@ function App() {
     return () => {
       cancelStream();
       if (timerRef.current) clearTimeout(timerRef.current);
-      inlineProviderRef.current?.dispose();
+      inlineProviderRef.current?.forEach(p => p.dispose());
     };
   }, [cancelStream]);
 
@@ -572,10 +613,25 @@ function App() {
     setIsRunning(true);
     setIsTerminalMinimized(false); // Auto-restore terminal panel to show output
     
-    // Print command prompt
+    // Determine dynamic terminal command prompt
+    const filename = activeFile || "main.py";
+    const ext = filename.split(".").pop().toLowerCase();
+    let promptText = `python ${filename}`;
+    if (ext === "cpp" || ext === "cc" || ext === "cxx") {
+      promptText = `g++ ${filename} -o ${filename.replace(/\.[^/.]+$/, "")} && .\\${filename.replace(/\.[^/.]+$/, "")}.exe`;
+    } else if (ext === "c") {
+      promptText = `gcc ${filename} -o ${filename.replace(/\.[^/.]+$/, "")} && .\\${filename.replace(/\.[^/.]+$/, "")}.exe`;
+    } else if (ext === "js") {
+      promptText = `node ${filename}`;
+    } else if (ext === "rs") {
+      promptText = `rustc ${filename} && .\\${filename.replace(/\.[^/.]+$/, "")}.exe`;
+    } else if (ext === "html" || ext === "css") {
+      promptText = `render ${filename}`;
+    }
+
     setTerminalLines((prev) => [
       ...prev,
-      { type: "prompt", text: "python main.py" },
+      { type: "prompt", text: promptText },
     ]);
 
     const controller = new AbortController();
@@ -585,7 +641,7 @@ function App() {
       const response = await fetch(`${BACKEND_URL}/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, filename }),
         signal: controller.signal,
       });
 
@@ -624,11 +680,7 @@ function App() {
       if (err.name === "AbortError") {
         setTerminalLines((prev) => [
           ...prev,
-          { type: "error", text: "Traceback (most recent call last):" },
-          { type: "error", text: '  File "main.py", line 5, in <module>' },
-          { type: "error", text: "    greet(\"World\")" },
-          { type: "error", text: "KeyboardInterrupt" },
-          { type: "error", text: "Process terminated by user (exit code -9) ✗" },
+          { type: "error", text: "KeyboardInterrupt: Process terminated by user (exit code -9) ✗" },
         ]);
       } else {
         setTerminalLines((prev) => [
@@ -700,7 +752,7 @@ function App() {
               Suggestion ready · <kbd>Tab</kbd> to accept
             </span>
           )}
-          <span className="lang-badge">Python 3</span>
+          <span className="lang-badge">{getLanguageLabel(activeFile)}</span>
           <button
             id="run-code-btn"
             className={`run-btn ${isRunning ? "running" : ""}`}
@@ -842,7 +894,7 @@ function App() {
             <div className="editor-wrapper">
               <Editor
                 height="100%"
-                defaultLanguage="python"
+                language={activeFile ? getLanguageFromExtension(activeFile) : "python"}
                 theme="vs-dark"
                 value={activeFile ? code : "# Create or select a file in the Explorer Sidebar to begin coding ⚡"}
                 onChange={handleCodeChange}

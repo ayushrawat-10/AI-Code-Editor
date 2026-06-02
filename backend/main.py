@@ -37,6 +37,7 @@ _hf_endpoint = HuggingFaceEndpoint(
 llm = ChatHuggingFace(llm=_hf_endpoint)
 
 # ── Copilot-style prompt ──────────────────────────────────────────────────────
+# ── Copilot-style prompt ──────────────────────────────────────────────────────
 template = PromptTemplate(
     template="""You are a real-time AI code completion engine similar to GitHub Copilot.
 
@@ -49,11 +50,14 @@ Rules:
 6. Do not repeat or rewrite existing code.
 7. If context ends mid-statement, complete it cleanly.
 
+File context:
+Writing file: {filename}
+
 Current code:
 {code}
 
 """,
-    input_variables=["code"]
+    input_variables=["code", "filename"]
 )
 
 chain = template | llm
@@ -61,9 +65,11 @@ chain = template | llm
 # ── Request schema ───────────────────────────────────────────────────────────
 class CodeRequest(BaseModel):
     code: str
+    filename: str = "main.py"
 
 class ExecuteRequest(BaseModel):
     code: str
+    filename: str = "main.py"
 
 # ── Streaming SSE endpoint ───────────────────────────────────────────────────
 @app.post("/suggest/stream")
@@ -75,7 +81,7 @@ async def stream_suggestion(req: CodeRequest):
     async def token_generator():
         collected = []
         try:
-            async for chunk in chain.astream({"code": req.code}):
+            async for chunk in chain.astream({"code": req.code, "filename": req.filename}):
                 token = chunk.content
                 if token:
                     collected.append(token)
@@ -85,7 +91,7 @@ async def stream_suggestion(req: CodeRequest):
             # Send a final done event with the full suggestion
             full = "".join(collected).strip()
             yield f"data: {json.dumps({'done': True, 'full': full})}\n\n"
-            print("\n=== AI Suggestion (streamed) ===")
+            print(f"\n=== AI Suggestion (streamed: {req.filename}) ===")
             print(full)
             print("================================")
         except Exception as e:
@@ -104,9 +110,9 @@ async def stream_suggestion(req: CodeRequest):
 @app.post("/suggest")
 async def suggest_code(req: CodeRequest):
     """Receive code from the editor, run AI completion, return full suggestion."""
-    response = await asyncio.to_thread(chain.invoke, {"code": req.code})
+    response = await asyncio.to_thread(chain.invoke, {"code": req.code, "filename": req.filename})
     suggestion = response.content.strip()
-    print("\n=== AI Suggestion ===")
+    print(f"\n=== AI Suggestion ({req.filename}) ===")
     print(suggestion)
     print("=====================")
     return {"suggestion": suggestion}
@@ -117,15 +123,55 @@ active_process = None
 @app.post("/execute")
 async def execute_code(req: ExecuteRequest, request: Request):
     """
-    Executes the submitted Python code in a safe subprocess and returns stdout/stderr.
+    Executes the submitted code dynamically based on file extension (supports Python, C, C++, HTML, JS, CSS, and Rust).
     """
     global active_process
-    # Create a temporary file to write the submitted Python code
-    with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as temp_file:
+    filename = req.filename or "main.py"
+    ext = filename.split(".")[-1].lower() if "." in filename else "py"
+    
+    # Create a temporary file with the correct suffix
+    suffix = f".{ext}"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="w", encoding="utf-8") as temp_file:
         temp_file.write(req.code)
         temp_file_path = temp_file.name
 
+    process = None
+    exe_path = None
+    
     try:
+        # Determine compilation and execution commands based on extension
+        cmd = None
+        compile_cmd = None
+        
+        if ext == "py":
+            cmd = [sys.executable, temp_file_path]
+        elif ext in ["cpp", "cc", "cxx"]:
+            exe_name = temp_file_path.replace(".cpp", ".exe").replace(".cc", ".exe").replace(".cxx", ".exe")
+            compile_cmd = ["g++", "-O2", temp_file_path, "-o", exe_name]
+            exe_path = exe_name
+            cmd = [exe_name]
+        elif ext == "c":
+            exe_name = temp_file_path.replace(".c", ".exe")
+            compile_cmd = ["gcc", "-O2", temp_file_path, "-o", exe_name]
+            exe_path = exe_name
+            cmd = [exe_name]
+        elif ext == "rs":
+            exe_name = temp_file_path.replace(".rs", ".exe")
+            compile_cmd = ["rustc", temp_file_path, "-o", exe_name]
+            exe_path = exe_name
+            cmd = [exe_name]
+        elif ext == "js":
+            cmd = ["node", temp_file_path]
+        elif ext in ["html", "css"]:
+            return {
+                "stdout": f"[Info] Loaded '{filename}' in visual workspace.\nNote: HTML/CSS elements are rendered client-side inside the browser.\nTo see the full visual page layout, download the file and open it in a local web browser!",
+                "stderr": "",
+                "exit_code": 0,
+            }
+        else:
+            # Fallback to Python
+            cmd = [sys.executable, temp_file_path]
+
         # Terminate any existing running process first to prevent duplicates
         if active_process:
             try:
@@ -134,9 +180,40 @@ async def execute_code(req: ExecuteRequest, request: Request):
             except Exception:
                 pass
 
-        # Start the subprocess synchronously in the background (platform independent)
+        # Perform compilation if required
+        if compile_cmd:
+            try:
+                comp_proc = await asyncio.to_thread(
+                    subprocess.run,
+                    compile_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=8.0
+                )
+                if comp_proc.returncode != 0:
+                    return {
+                        "stdout": "",
+                        "stderr": f"Compilation Error:\n{comp_proc.stderr or comp_proc.stdout}",
+                        "exit_code": comp_proc.returncode,
+                    }
+            except FileNotFoundError:
+                compiler_name = compile_cmd[0]
+                return {
+                    "stdout": "",
+                    "stderr": f"Compilation Error: '{compiler_name}' compiler was not found on your system PATH.\nPlease make sure MinGW/GCC (for C/C++) or Rustup (for Rust) is installed and configured.",
+                    "exit_code": -127,
+                }
+            except subprocess.TimeoutExpired:
+                return {
+                    "stdout": "",
+                    "stderr": "Compilation Timeout: Compiling took longer than 8 seconds.",
+                    "exit_code": -1,
+                }
+
+        # Start the execution subprocess
         process = subprocess.Popen(
-            [sys.executable, temp_file_path],
+            cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -191,6 +268,14 @@ async def execute_code(req: ExecuteRequest, request: Request):
             except Exception:
                 pass
         raise
+    except FileNotFoundError:
+        # Catch runtime not found (e.g. node not installed)
+        runtime_name = cmd[0] if cmd else "executable"
+        return {
+            "stdout": "",
+            "stderr": f"Execution Error: '{runtime_name}' runtime was not found on your system PATH.\nPlease make sure it is installed and configured.",
+            "exit_code": -127,
+        }
     except Exception as e:
         import traceback
         traceback.print_exc()  # print exact traceback to backend console
@@ -200,14 +285,20 @@ async def execute_code(req: ExecuteRequest, request: Request):
             "exit_code": -2,
         }
     finally:
-        if active_process == process:
+        if active_process == process and process is not None:
             active_process = None
-        # Guarantee deletion of the temporary file after run
+        # Guarantee deletion of the temporary file and compiled exe after run
         if os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
             except Exception:
                 pass
+        if exe_path and os.path.exists(exe_path):
+            try:
+                os.remove(exe_path)
+            except Exception:
+                pass
+
 
 @app.post("/execute/stop")
 async def stop_execution():
