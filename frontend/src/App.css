@@ -308,6 +308,22 @@ body {
   background: var(--bg-terminal);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  overflow: hidden;
+  transition: height 0.25s cubic-bezier(0.25, 1, 0.5, 1), min-height 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.terminal-section.minimized {
+  height: 34px !important;
+  min-height: 34px !important;
+}
+
+.terminal-controls .toggle-btn {
+  font-size: 10px;
+  transition: transform 0.2s ease, color 0.15s;
+}
+
+.terminal-controls .toggle-btn:hover {
+  color: var(--accent);
 }
 
 .terminal-header {

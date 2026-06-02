@@ -87,6 +87,7 @@ function App() {
   const [terminalLines, setTerminalLines] = useState([
     { type: "info", text: "Terminal ready. Click Run to execute your code." },
   ]);
+  const [isTerminalMinimized, setIsTerminalMinimized] = useState(false);
 
   const terminalBodyRef = useRef(null);
   const editorRef = useRef(null);
@@ -494,9 +495,9 @@ function App() {
           </section>
 
           {/* Terminal section */}
-          <section className="terminal-section" aria-label="Output Terminal">
+          <section className={`terminal-section ${isTerminalMinimized ? "minimized" : ""}`} aria-label="Output Terminal">
             <div className="terminal-header">
-              <div className="terminal-tabs">
+              <div className="terminal-tabs" onClick={() => setIsTerminalMinimized(prev => !prev)} style={{ cursor: "pointer" }}>
                 <div className="terminal-tab active">Output</div>
                 <div className="terminal-tab">Problems</div>
               </div>
@@ -507,6 +508,14 @@ function App() {
                   title="Clear terminal"
                 >
                   🗑
+                </button>
+                <button
+                  className="terminal-ctrl-btn toggle-btn"
+                  onClick={() => setIsTerminalMinimized(prev => !prev)}
+                  title={isTerminalMinimized ? "Restore terminal" : "Minimize terminal"}
+                  style={{ marginLeft: 8 }}
+                >
+                  {isTerminalMinimized ? "▲" : "▼"}
                 </button>
               </div>
             </div>
