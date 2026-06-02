@@ -910,3 +910,41 @@ kbd {
   outline: none;
   box-shadow: 0 0 8px var(--accent-glow);
 }
+
+/* File Action Download Hover Glow */
+.file-action-btn.download:hover {
+  color: var(--green);
+  text-shadow: 0 0 8px rgba(61, 220, 132, 0.4);
+  background: rgba(61, 220, 132, 0.08);
+}
+
+/* Editor Gutter Download Button */
+.editor-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+  line-height: 1;
+}
+
+.editor-download-btn:hover {
+  color: var(--green);
+  background: rgba(61, 220, 132, 0.08);
+  border-color: rgba(61, 220, 132, 0.35);
+  box-shadow: 0 0 10px rgba(61, 220, 132, 0.15);
+  transform: translateY(-1px);
+}
+
+.editor-download-btn:active {
+  transform: translateY(0);
+}
+

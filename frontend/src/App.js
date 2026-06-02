@@ -465,6 +465,27 @@ function App() {
     clearGhost();
   }, [activeFile, clearGhost]);
 
+  const handleDownloadFile = useCallback((fileName, e) => {
+    if (e) e.stopPropagation();
+    
+    let content = files[fileName];
+    if (fileName === activeFile) {
+      content = currentCodeRef.current;
+    }
+    
+    if (content === undefined) return;
+
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [files, activeFile]);
+
   // ── Wire up keyboard shortcuts + inline completions provider after mount ────
   const handleEditorMount = useCallback(
     (editor, monaco) => {
@@ -771,6 +792,13 @@ function App() {
                           ✏️
                         </button>
                         <button
+                          className="file-action-btn download"
+                          onClick={(e) => handleDownloadFile(fileName, e)}
+                          title="Download File"
+                        >
+                          📥
+                        </button>
+                        <button
                           className="file-action-btn delete"
                           onClick={(e) => handleDeleteFile(fileName, e)}
                           title="Delete File"
@@ -799,6 +827,15 @@ function App() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <span>{activeFile ? code.split("\n").length : 0} lines</span>
+                {activeFile && (
+                  <button
+                    className="editor-download-btn"
+                    onClick={(e) => handleDownloadFile(activeFile, e)}
+                    title="Download Current File"
+                  >
+                    📥 Download
+                  </button>
+                )}
               </div>
             </div>
 
