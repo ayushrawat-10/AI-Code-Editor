@@ -76,6 +76,35 @@ function getLanguageLabel(fileName) {
   }
 }
 
+function getLanguageFileIcon(fileName) {
+  if (!fileName) return <span className="file-lang-icon default">📄</span>;
+  const ext = fileName.split(".").pop().toLowerCase();
+  switch (ext) {
+    case "html":
+    case "htm":
+      return <span className="file-lang-icon html">&lt;&gt;</span>;
+    case "css":
+      return <span className="file-lang-icon css">#</span>;
+    case "js":
+    case "jsx":
+      return <span className="file-lang-icon js">JS</span>;
+    case "py":
+      return <span className="file-lang-icon python">PY</span>;
+    case "rs":
+      return <span className="file-lang-icon rust">RS</span>;
+    case "cpp":
+    case "cc":
+    case "cxx":
+      return <span className="file-lang-icon cpp">C++</span>;
+    case "c":
+      return <span className="file-lang-icon c-lang">C</span>;
+    case "md":
+      return <span className="file-lang-icon md">ℹ</span>;
+    default:
+      return <span className="file-lang-icon default">📄</span>;
+  }
+}
+
 // ── Stream a suggestion from the backend, calling onToken for each chunk ─────
 async function streamSuggestion(code, filename, onToken, onDone, signal) {
   try {
@@ -152,6 +181,72 @@ function App() {
   const runAbortControllerRef = useRef(null);
   const isCreatingFileCancelingRef = useRef(false);
   const isRenameCancelingRef = useRef(false);
+
+  const [isProjectExpanded, setIsProjectExpanded] = useState(true);
+  const [isSrcExpanded, setIsSrcExpanded] = useState(true);
+
+  const [terminalHeight, setTerminalHeight] = useState(220);
+  const [isDraggingTerminal, setIsDraggingTerminal] = useState(false);
+
+  const handleResizerMouseDown = useCallback((e) => {
+    e.preventDefault();
+    setIsDraggingTerminal(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isDraggingTerminal) {
+      document.body.classList.remove("dragging-terminal-active");
+      return;
+    }
+
+    document.body.classList.add("dragging-terminal-active");
+
+    const handleMouseMove = (e) => {
+      const newHeight = window.innerHeight - e.clientY;
+      const minHeight = 100;
+      const maxHeight = window.innerHeight * 0.7;
+      if (newHeight >= minHeight && newHeight <= maxHeight) {
+        setTerminalHeight(newHeight);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingTerminal(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.body.classList.remove("dragging-terminal-active");
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDraggingTerminal]);
+
+  const handleSaveFile = useCallback(() => {
+    if (!activeFile) return;
+    setTerminalLines(prev => [
+      ...prev,
+      { type: "success", text: `✓ [System] saved '${activeFile}' successfully to browser in-memory session.` }
+    ]);
+  }, [activeFile]);
+
+  const handleShareFile = useCallback(() => {
+    if (!activeFile) return;
+    const shareCode = currentCodeRef.current;
+    navigator.clipboard.writeText(shareCode).then(() => {
+      setTerminalLines(prev => [
+        ...prev,
+        { type: "info", text: `→ [Link] Code snippet for '${activeFile}' copied to clipboard!` }
+      ]);
+    }).catch(err => {
+      setTerminalLines(prev => [
+        ...prev,
+        { type: "error", text: `✗ Failed to copy shareable link: ${err.message}` }
+      ]);
+    });
+  }, [activeFile]);
 
   // ── Auto-scroll terminal ──────────────────────────────────────────────────
   useEffect(() => {
@@ -532,6 +627,21 @@ function App() {
       editorRef.current = editor;
       monacoRef.current = monaco;
 
+      // Define custom purple workspace theme matching styling mockup
+      monaco.editor.defineTheme('custom-purple-theme', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [],
+        colors: {
+          'editor.background': '#141328',
+          'editor.lineHighlightBackground': '#201e3b',
+          'editorGutter.background': '#141328',
+          'editor.selectionBackground': '#3e3a72',
+          'editor.inactiveSelectionBackground': '#262447',
+        }
+      });
+      monaco.editor.setTheme('custom-purple-theme');
+
       // Register Monaco's native inline completions provider for all supported languages.
       const SUPPORTED_LANGUAGES = ["python", "cpp", "c", "html", "javascript", "css", "rust"];
       const providers = SUPPORTED_LANGUAGES.map(lang => 
@@ -722,6 +832,60 @@ function App() {
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
+  const fileNames = Object.keys(files);
+  const srcFiles = fileNames.filter(name => !name.endsWith(".md"));
+  const rootFiles = fileNames.filter(name => name.endsWith(".md"));
+
+  const renderFileItem = (fileName) => {
+    const isActive = fileName === activeFile;
+    return editingFileName === fileName ? (
+      <div key={fileName} className="file-item rename-mode" onClick={(e) => e.stopPropagation()}>
+        {getLanguageFileIcon(fileName)}
+        <input
+          type="text"
+          className="file-rename-input"
+          value={renameInputValue}
+          onChange={(e) => setRenameInputValue(e.target.value)}
+          onKeyDown={(e) => handleRenameKeyDown(e, fileName)}
+          onBlur={() => handleRenameSubmit(fileName)}
+          autoFocus
+        />
+      </div>
+    ) : (
+      <div
+        key={fileName}
+        className={`file-item ${isActive ? "active" : ""}`}
+        onClick={() => handleFileSelect(fileName)}
+      >
+        {getLanguageFileIcon(fileName)}
+        <span className="file-name">{fileName}</span>
+        <div className="file-actions">
+          <button
+            className="file-action-btn rename"
+            onClick={(e) => handleRenameStart(fileName, e)}
+            title="Rename File"
+          >
+            ✏️
+          </button>
+          <button
+            className="file-action-btn download"
+            onClick={(e) => handleDownloadFile(fileName, e)}
+            title="Download File"
+          >
+            📥
+          </button>
+          <button
+            className="file-action-btn delete"
+            onClick={(e) => handleDeleteFile(fileName, e)}
+            title="Delete File"
+          >
+            🗑️
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app-shell">
 
@@ -729,14 +893,29 @@ function App() {
       <header className="app-header">
         <div className="header-left">
           <div className="app-logo">⚡</div>
-          <h1 className="app-title">Code<span>AI</span></h1>
+          <h1 className="app-title">AI<span>-Code-Editor</span></h1>
+          <div className="project-selector" title="Select Project Directory">
+            <span>My Project</span>
+            <span className="dropdown-caret">▼</span>
+          </div>
         </div>
 
         <div className="header-center">
-          <div className={`tab-item ${activeFile ? "active" : "inactive"}`}>
-            {activeFile ? <div className="tab-dot" /> : null}
-            {activeFile || "(No file open)"}
-          </div>
+          <button className="header-action-btn save" onClick={handleSaveFile} title="Save current file in-memory">
+            <span className="btn-icon">💾</span> Save
+          </button>
+          <button
+            id="run-code-btn"
+            className={`header-action-btn run ${isRunning ? "running" : ""}`}
+            onClick={isRunning ? handleStopCode : handleRunCode}
+            title={isRunning ? "Stop execution" : "Run current program"}
+          >
+            <span className="btn-icon">{isRunning ? "⏹" : "▶"}</span>
+            {isRunning ? "Stop" : "Run"}
+          </button>
+          <button className="header-action-btn share" onClick={handleShareFile} title="Share code snippet">
+            <span className="btn-icon">🔗</span> Share
+          </button>
         </div>
 
         <div className="header-right">
@@ -753,14 +932,6 @@ function App() {
             </span>
           )}
           <span className="lang-badge">{getLanguageLabel(activeFile)}</span>
-          <button
-            id="run-code-btn"
-            className={`run-btn ${isRunning ? "running" : ""}`}
-            onClick={isRunning ? handleStopCode : handleRunCode}
-          >
-            <span className="run-icon">{isRunning ? "⏹" : "▶"}</span>
-            {isRunning ? "Stop" : "Run Code"}
-          </button>
         </div>
       </header>
 
@@ -786,18 +957,42 @@ function App() {
           <div className="sidebar">
             <div className="sidebar-header">
               <span>EXPLORER</span>
-              <button
-                className="new-file-btn"
-                onClick={() => setIsCreatingFile(true)}
-                title="New File"
-              >
-                📄+
-              </button>
+              <div className="sidebar-tools">
+                <button
+                  className="new-file-btn"
+                  onClick={() => setIsCreatingFile(true)}
+                  title="New File"
+                >
+                  📄+
+                </button>
+                <button
+                  className="new-file-btn"
+                  onClick={() => alert("Directories are managed dynamically! You can create nested paths directly by adding names like 'src/helper.py'!")}
+                  title="New Folder"
+                >
+                  📁+
+                </button>
+                <button
+                  className="new-file-btn"
+                  onClick={() => {
+                    clearGhost();
+                    if (activeFile) {
+                      setTerminalLines(prev => [
+                        ...prev,
+                        { type: "info", text: "⟳ Explorer listing refreshed successfully." }
+                      ]);
+                    }
+                  }}
+                  title="Refresh Explorer"
+                >
+                  ↻
+                </button>
+              </div>
             </div>
             
             <div className="sidebar-content">
               {isCreatingFile && (
-                <div className="new-file-input-wrapper">
+                <div className="new-file-input-wrapper" style={{ marginLeft: isSrcExpanded && isProjectExpanded ? "32px" : "16px" }}>
                   <span className="file-icon">📄</span>
                   <input
                     type="text"
@@ -812,55 +1007,49 @@ function App() {
                 </div>
               )}
               
-              <div className="file-list">
-                {Object.keys(files).map((fileName) => (
-                  editingFileName === fileName ? (
-                    <div key={fileName} className="file-item rename-mode" onClick={(e) => e.stopPropagation()}>
-                      <span className="file-icon">📄</span>
-                      <input
-                        type="text"
-                        className="file-rename-input"
-                        value={renameInputValue}
-                        onChange={(e) => setRenameInputValue(e.target.value)}
-                        onKeyDown={(e) => handleRenameKeyDown(e, fileName)}
-                        onBlur={() => handleRenameSubmit(fileName)}
-                        autoFocus
-                      />
-                    </div>
-                  ) : (
-                    <div
-                      key={fileName}
-                      className={`file-item ${fileName === activeFile ? "active" : ""}`}
-                      onClick={() => handleFileSelect(fileName)}
+              <div className="explorer-tree">
+                {/* MY PROJECT Folder Root */}
+                <div 
+                  className={`tree-folder-node ${isProjectExpanded ? "expanded" : ""}`}
+                  onClick={() => setIsProjectExpanded(prev => !prev)}
+                >
+                  <span className="folder-caret">{isProjectExpanded ? "▼" : "▶"}</span>
+                  <span className="folder-icon">📁</span>
+                  <span className="folder-name">MY PROJECT</span>
+                </div>
+
+                {isProjectExpanded && (
+                  <div className="tree-folder-contents">
+                    {/* src Folder Node */}
+                    <div 
+                      className={`tree-folder-node ${isSrcExpanded ? "expanded" : ""}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsSrcExpanded(prev => !prev);
+                      }}
+                      style={{ paddingLeft: "16px" }}
                     >
-                      <span className="file-icon">📄</span>
-                      <span className="file-name">{fileName}</span>
-                      <div className="file-actions">
-                        <button
-                          className="file-action-btn rename"
-                          onClick={(e) => handleRenameStart(fileName, e)}
-                          title="Rename File"
-                        >
-                          ✏️
-                        </button>
-                        <button
-                          className="file-action-btn download"
-                          onClick={(e) => handleDownloadFile(fileName, e)}
-                          title="Download File"
-                        >
-                          📥
-                        </button>
-                        <button
-                          className="file-action-btn delete"
-                          onClick={(e) => handleDeleteFile(fileName, e)}
-                          title="Delete File"
-                        >
-                          🗑️
-                        </button>
-                      </div>
+                      <span className="folder-caret">{isSrcExpanded ? "▼" : "▶"}</span>
+                      <span className="folder-icon">📁</span>
+                      <span className="folder-name">src</span>
                     </div>
-                  )
-                ))}
+
+                    {isSrcExpanded && (
+                      <div className="tree-folder-contents" style={{ paddingLeft: "24px" }}>
+                        {srcFiles.length === 0 ? (
+                          <div className="empty-folder-label">(empty)</div>
+                        ) : (
+                          srcFiles.map(fileName => renderFileItem(fileName))
+                        )}
+                      </div>
+                    )}
+
+                    {/* Root Flat Files (e.g. README.md) */}
+                    <div className="tree-flat-files" style={{ paddingLeft: "16px", marginTop: "4px" }}>
+                      {rootFiles.map(fileName => renderFileItem(fileName))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -874,11 +1063,22 @@ function App() {
             <div className="editor-gutter">
               <div className="editor-gutter-left">
                 <span className="editor-breadcrumb">
-                  workspace / <span className="file-name">{activeFile || "(no file open)"}</span>
+                  {activeFile ? (
+                    <>
+                      <span className="breadcrumb-path">src</span>
+                      <span className="breadcrumb-separator">&gt;</span>
+                      {getLanguageFileIcon(activeFile)}
+                      <span className="file-name">{activeFile}</span>
+                      <span className="breadcrumb-separator">&gt;</span>
+                      <span className="breadcrumb-ellipsis">...</span>
+                    </>
+                  ) : (
+                    <span>workspace / (no file open)</span>
+                  )}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span>{activeFile ? code.split("\n").length : 0} lines</span>
+                <span>Ln {activeFile ? code.split("\n").length : 0}, Col 1</span>
                 {activeFile && (
                   <button
                     className="editor-download-btn"
@@ -905,19 +1105,25 @@ function App() {
           </section>
 
           {/* Terminal section */}
-          <section className={`terminal-section ${isTerminalMinimized ? "minimized" : ""}`} aria-label="Output Terminal">
+          <section 
+            className={`terminal-section ${isTerminalMinimized ? "minimized" : ""} ${isDraggingTerminal ? "dragging" : ""}`} 
+            style={{ height: isTerminalMinimized ? undefined : `${terminalHeight}px` }}
+            aria-label="Output Terminal"
+          >
+            <div className="terminal-resizer" onMouseDown={handleResizerMouseDown} title="Drag to resize terminal panel" />
             <div className="terminal-header">
-              <div className="terminal-tabs" onClick={() => setIsTerminalMinimized(prev => !prev)} style={{ cursor: "pointer" }}>
-                <div className="terminal-tab active">Output</div>
-                <div className="terminal-tab">Problems</div>
+              <div className="terminal-tabs">
+                <div className="terminal-tab active">OUTPUT</div>
+                <div className="terminal-tab">TERMINAL</div>
+                <div className="terminal-tab">DEBUG CONSOLE</div>
               </div>
               <div className="terminal-controls">
                 <button
                   className="terminal-ctrl-btn"
                   onClick={clearTerminal}
-                  title="Clear terminal"
+                  title="Clear Output"
                 >
-                  🗑
+                  Clear 🗑
                 </button>
                 <button
                   className="terminal-ctrl-btn toggle-btn"
@@ -960,20 +1166,34 @@ function App() {
 
       {/* ── Status Bar ── */}
       <footer className="status-bar">
-        <div className="status-item">⚡ CodeAI</div>
-        <div className="status-item">🐍 Python 3</div>
-        <div className="status-item">
-          {isRunning
-            ? "⏳ Running…"
-            : isSyncing
-              ? "⟳ AI Thinking…"
-              : hasGhost
-                ? "✦ Suggestion Ready"
-                : "✓ Ready"}
+        <div className="status-left">
+          <span className="status-notification error">
+            <span className="notification-icon">⊗</span> 0
+          </span>
+          <span className="status-notification warning">
+            <span className="notification-icon">⚠</span> 0
+          </span>
+          <span className="status-divider">|</span>
+          <div className="status-item">
+            {isRunning
+              ? "⏳ Process running..."
+              : isSyncing
+                ? "⟳ AI suggesting..."
+                : hasGhost
+                  ? "✦ Suggestion ready (Tab to accept)"
+                  : "✓ Ready"}
+          </div>
         </div>
         <div className="status-right">
-          <div className="status-item">Ln {code.split("\n").length}</div>
+          <div className="status-item">Ln {code.split("\n").length}, Col 1</div>
+          <div className="status-item">Spaces: 2</div>
           <div className="status-item">UTF-8</div>
+          <div className="status-item">LF</div>
+          <div className="status-item lang-label">{getLanguageLabel(activeFile)}</div>
+          <span className="status-divider">|</span>
+          <div className="status-item settings-trigger" onClick={() => setIsSidebarOpen(prev => !prev)}>
+            ⚙ Settings
+          </div>
         </div>
       </footer>
     </div>
