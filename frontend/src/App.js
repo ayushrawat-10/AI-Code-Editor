@@ -80,6 +80,16 @@ async function streamSuggestion(code, onToken, onDone, signal) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 function App() {
+  const [files, setFiles] = useState({
+    "main.py": DEFAULT_CODE
+  });
+  const [activeFile, setActiveFile] = useState("main.py");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isCreatingFile, setIsCreatingFile] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
+  const [editingFileName, setEditingFileName] = useState("");
+  const [renameInputValue, setRenameInputValue] = useState("");
+
   const [code, setCode] = useState(DEFAULT_CODE);
   const [isRunning, setIsRunning] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -101,6 +111,8 @@ function App() {
   const accumulatedRef = useRef("");
   const inlineProviderRef = useRef(null);
   const runAbortControllerRef = useRef(null);
+  const isCreatingFileCancelingRef = useRef(false);
+  const isRenameCancelingRef = useRef(false);
 
   // ── Auto-scroll terminal ──────────────────────────────────────────────────
   useEffect(() => {
@@ -290,6 +302,11 @@ function App() {
     setCode(newCode);
     currentCodeRef.current = newCode;
 
+    setFiles(prev => ({
+      ...prev,
+      [activeFile]: newCode
+    }));
+
     // Re-evaluate the current suggestion via prefix matching.
     // If the user's new chars match the suggestion, it trims live.
     // If not, ghost clears — but we do NOT cancel the stream.
@@ -302,7 +319,151 @@ function App() {
     debounceTimerRef.current = setTimeout(() => {
       fetchSuggestion(newCode);
     }, 300);
-  }, [applyGhost, fetchSuggestion]);
+  }, [applyGhost, fetchSuggestion, activeFile]);
+
+  // ── File Explorer callbacks ────────────────────────────────────────────────
+  const handleFileSelect = useCallback((fileName) => {
+    const currentVal = currentCodeRef.current;
+    
+    // Atomic state batching to prevent async lag discrepancies
+    setFiles(prev => {
+      const updated = {
+        ...prev,
+        [activeFile]: currentVal
+      };
+      
+      const newContent = updated[fileName] ?? "";
+      setCode(newContent);
+      currentCodeRef.current = newContent;
+      return updated;
+    });
+    
+    setActiveFile(fileName);
+    clearGhost();
+  }, [activeFile, clearGhost]);
+
+  const handleCreateFileSubmit = useCallback(() => {
+    setIsCreatingFile(false);
+    if (isCreatingFileCancelingRef.current) {
+      isCreatingFileCancelingRef.current = false;
+      setNewFileName("");
+      return;
+    }
+    const trimmed = newFileName.trim();
+    setNewFileName("");
+    if (!trimmed) return;
+    
+    // Prevent duplicates
+    if (files[trimmed] !== undefined) {
+      alert(`A file named "${trimmed}" already exists.`);
+      return;
+    }
+    
+    const currentVal = currentCodeRef.current;
+    
+    // Atomic file creation and switching inside the state batch
+    setFiles(prev => {
+      const updated = {
+        ...prev,
+        [activeFile]: currentVal,
+        [trimmed]: ""
+      };
+      
+      setCode("");
+      currentCodeRef.current = "";
+      return updated;
+    });
+    
+    setActiveFile(trimmed);
+    clearGhost();
+  }, [activeFile, newFileName, files, clearGhost]);
+
+  const handleNewFileKeyDown = useCallback((e) => {
+    if (e.key === "Enter") {
+      handleCreateFileSubmit();
+    } else if (e.key === "Escape") {
+      isCreatingFileCancelingRef.current = true;
+      setIsCreatingFile(false);
+      setNewFileName("");
+    }
+  }, [handleCreateFileSubmit]);
+
+  const handleRenameStart = useCallback((fileName, e) => {
+    e.stopPropagation();
+    setEditingFileName(fileName);
+    setRenameInputValue(fileName);
+  }, []);
+
+  const handleRenameSubmit = useCallback((oldName) => {
+    setEditingFileName("");
+    if (isRenameCancelingRef.current) {
+      isRenameCancelingRef.current = false;
+      setRenameInputValue("");
+      return;
+    }
+    
+    if (editingFileName !== oldName) return;
+    
+    const trimmed = renameInputValue.trim();
+    if (!trimmed || trimmed === oldName) return;
+    
+    // Prevent duplicates
+    if (files[trimmed] !== undefined) {
+      alert(`A file named "${trimmed}" already exists.`);
+      return;
+    }
+    
+    setFiles(prev => {
+      if (prev[oldName] === undefined) return prev; // Avoid overwriting with undefined
+      const updated = { ...prev };
+      updated[trimmed] = updated[oldName];
+      delete updated[oldName];
+      return updated;
+    });
+    
+    if (activeFile === oldName) {
+      setActiveFile(trimmed);
+    }
+  }, [renameInputValue, files, activeFile, editingFileName]);
+
+  const handleRenameKeyDown = useCallback((e, oldName) => {
+    if (e.key === "Enter") {
+      handleRenameSubmit(oldName);
+    } else if (e.key === "Escape") {
+      isRenameCancelingRef.current = true;
+      setEditingFileName("");
+    }
+  }, [handleRenameSubmit]);
+
+  const handleDeleteFile = useCallback((fileName, e) => {
+    e.stopPropagation();
+    
+    // Ask for delete confirmation
+    const confirmDelete = window.confirm(`Are you sure you want to delete "${fileName}"?`);
+    if (!confirmDelete) return;
+    
+    setFiles(prev => {
+      const updated = { ...prev };
+      delete updated[fileName];
+      
+      // Auto switch active file if we deleted the current active file
+      if (activeFile === fileName) {
+        const remaining = Object.keys(updated);
+        if (remaining.length > 0) {
+          const nextActive = remaining[0];
+          setActiveFile(nextActive);
+          setCode(updated[nextActive]);
+          currentCodeRef.current = updated[nextActive];
+        } else {
+          setActiveFile("");
+          setCode("");
+          currentCodeRef.current = "";
+        }
+      }
+      return updated;
+    });
+    clearGhost();
+  }, [activeFile, clearGhost]);
 
   // ── Wire up keyboard shortcuts + inline completions provider after mount ────
   const handleEditorMount = useCallback(
@@ -484,6 +645,7 @@ function App() {
     suggestOnTriggerCharacters: false,
     // Enable Monaco's inline suggest so the provider renders ghost text natively
     inlineSuggest: { enabled: true, mode: "prefix", showToolbar: "never" },
+    readOnly: !activeFile,
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -498,9 +660,9 @@ function App() {
         </div>
 
         <div className="header-center">
-          <div className="tab-item active">
-            <div className="tab-dot" />
-            main.py
+          <div className={`tab-item ${activeFile ? "active" : "inactive"}`}>
+            {activeFile ? <div className="tab-dot" /> : null}
+            {activeFile || "(No file open)"}
           </div>
         </div>
 
@@ -534,11 +696,95 @@ function App() {
 
         {/* Activity bar */}
         <nav className="activity-bar" aria-label="Activity Bar">
-          <div className="activity-icon active" title="Explorer">📁</div>
+          <div
+            className={`activity-icon ${isSidebarOpen ? "active" : ""}`}
+            title="Explorer"
+            onClick={() => setIsSidebarOpen(prev => !prev)}
+          >
+            📁
+          </div>
           <div className="activity-icon" title="Search">🔍</div>
           <div className="activity-icon" title="AI Suggestions">✨</div>
           <div className="activity-icon" title="Settings">⚙️</div>
         </nav>
+
+        {/* File Explorer Sidebar */}
+        {isSidebarOpen && (
+          <div className="sidebar">
+            <div className="sidebar-header">
+              <span>EXPLORER</span>
+              <button
+                className="new-file-btn"
+                onClick={() => setIsCreatingFile(true)}
+                title="New File"
+              >
+                📄+
+              </button>
+            </div>
+            
+            <div className="sidebar-content">
+              {isCreatingFile && (
+                <div className="new-file-input-wrapper">
+                  <span className="file-icon">📄</span>
+                  <input
+                    type="text"
+                    className="new-file-input"
+                    value={newFileName}
+                    onChange={(e) => setNewFileName(e.target.value)}
+                    onKeyDown={handleNewFileKeyDown}
+                    onBlur={handleCreateFileSubmit}
+                    placeholder="file.py"
+                    autoFocus
+                  />
+                </div>
+              )}
+              
+              <div className="file-list">
+                {Object.keys(files).map((fileName) => (
+                  editingFileName === fileName ? (
+                    <div key={fileName} className="file-item rename-mode" onClick={(e) => e.stopPropagation()}>
+                      <span className="file-icon">📄</span>
+                      <input
+                        type="text"
+                        className="file-rename-input"
+                        value={renameInputValue}
+                        onChange={(e) => setRenameInputValue(e.target.value)}
+                        onKeyDown={(e) => handleRenameKeyDown(e, fileName)}
+                        onBlur={() => handleRenameSubmit(fileName)}
+                        autoFocus
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      key={fileName}
+                      className={`file-item ${fileName === activeFile ? "active" : ""}`}
+                      onClick={() => handleFileSelect(fileName)}
+                    >
+                      <span className="file-icon">📄</span>
+                      <span className="file-name">{fileName}</span>
+                      <div className="file-actions">
+                        <button
+                          className="file-action-btn rename"
+                          onClick={(e) => handleRenameStart(fileName, e)}
+                          title="Rename File"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          className="file-action-btn delete"
+                          onClick={(e) => handleDeleteFile(fileName, e)}
+                          title="Delete File"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Editor + Terminal */}
         <div className="editor-terminal-pane">
@@ -548,11 +794,11 @@ function App() {
             <div className="editor-gutter">
               <div className="editor-gutter-left">
                 <span className="editor-breadcrumb">
-                  workspace / <span className="file-name">main.py</span>
+                  workspace / <span className="file-name">{activeFile || "(no file open)"}</span>
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span>{code.split("\n").length} lines</span>
+                <span>{activeFile ? code.split("\n").length : 0} lines</span>
               </div>
             </div>
 
@@ -561,7 +807,7 @@ function App() {
                 height="100%"
                 defaultLanguage="python"
                 theme="vs-dark"
-                value={code}
+                value={activeFile ? code : "# Create or select a file in the Explorer Sidebar to begin coding ⚡"}
                 onChange={handleCodeChange}
                 options={editorOptions}
                 onMount={handleEditorMount}
