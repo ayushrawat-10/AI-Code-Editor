@@ -26,15 +26,26 @@ app.add_middleware(
 )
 
 # ── Model setup ──────────────────────────────────────────────────────────────
-# HuggingFace — active
+# Inline code completion — kept lean (short, precise completions)
 _hf_endpoint = HuggingFaceEndpoint(
     repo_id="Qwen/Qwen2.5-Coder-7B-Instruct",
     task="text-generation",
-    max_new_tokens=120,
+    max_new_tokens=256,          # enough for 2-8 line completions
     temperature=0.2,
     streaming=True,
 )
 llm = ChatHuggingFace(llm=_hf_endpoint)
+
+# Chat assistant — larger context window so responses are never truncated
+_hf_chat_endpoint = HuggingFaceEndpoint(
+    repo_id="Qwen/Qwen2.5-Coder-7B-Instruct",
+    task="text-generation",
+    max_new_tokens=1024,         # ample room for full explanations
+    temperature=0.4,
+    repetition_penalty=1.1,
+    streaming=True,
+)
+chat_llm = ChatHuggingFace(llm=_hf_chat_endpoint)
 
 # ── Copilot-style prompt ──────────────────────────────────────────────────────
 # ── Copilot-style prompt ──────────────────────────────────────────────────────
@@ -358,7 +369,7 @@ Assistant Response:
     input_variables=["code", "filename", "message"]
 )
 
-chat_chain = chat_template | llm
+chat_chain = chat_template | chat_llm  # uses the high-token-limit model
 
 @app.post("/chat")
 async def chat_with_ai(req: ChatRequest):
@@ -392,7 +403,10 @@ async def chat_with_ai_stream(req: ChatRequest):
             full = "".join(collected).strip()
             yield f"data: {json.dumps({'done': True, 'full': full})}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            error_msg = str(e)
+            # Provide a friendly short label + the raw error detail
+            user_msg = "Response generation failed. The AI model encountered an error."
+            yield f"data: {json.dumps({'error': error_msg, 'user_message': user_msg})}\n\n"
 
     return StreamingResponse(
         token_generator(),

@@ -47,6 +47,122 @@ def greet(name):
 greet("World")
 `;
 
+function CopyButton({ code, onCopy }) {
+  const [copied, setCopied] = React.useState(false);
+  const handleClick = () => {
+    onCopy(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
+  return (
+    <button type="button" className={`chat-code-copy ${copied ? "copied" : ""}`} onClick={handleClick}>
+      {copied ? (
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/></svg>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"/></svg>
+      )}
+      {copied ? "Copied!" : "Copy"}
+    </button>
+  );
+}
+
+// ── Inline markdown → React nodes (bold, italic, inline-code) ─────────────────
+function parseInline(text, baseKey) {
+  // Tokens: **bold**, *italic*, `code`
+  const pattern = /(`[^`]+`|\*\*[\s\S]+?\*\*|\*[^*]+\*)/g;
+  const parts = [];
+  let last = 0;
+  let match;
+  let idx = 0;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > last) {
+      parts.push(<React.Fragment key={`${baseKey}-t${idx++}`}>{text.slice(last, match.index)}</React.Fragment>);
+    }
+    const token = match[0];
+    if (token.startsWith("**")) {
+      parts.push(<strong key={`${baseKey}-b${idx++}`}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("`")) {
+      parts.push(<code key={`${baseKey}-c${idx++}`} className="md-inline-code">{token.slice(1, -1)}</code>);
+    } else {
+      parts.push(<em key={`${baseKey}-i${idx++}`}>{token.slice(1, -1)}</em>);
+    }
+    last = match.index + token.length;
+  }
+  if (last < text.length) {
+    parts.push(<React.Fragment key={`${baseKey}-t${idx++}`}>{text.slice(last)}</React.Fragment>);
+  }
+  return parts;
+}
+
+// ── Block markdown renderer (headings, lists, paragraphs, hr) ─────────────────
+function renderMarkdownBlock(text, blockKey, onCopyCode) {
+  const lines = text.split("\n");
+  const elements = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const raw = lines[i];
+    const trimmed = raw.trim();
+
+    // Skip blank lines
+    if (!trimmed) { i++; continue; }
+
+    // Horizontal rule
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      elements.push(<hr key={`${blockKey}-hr-${i}`} className="md-hr" />);
+      i++; continue;
+    }
+
+    // ATX Headings  # ## ###
+    const headingMatch = trimmed.match(/^(#{1,3})\s+(.*)/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const Tag = `h${level + 2}`; // h3, h4, h5 so they stay subordinate to page h1
+      elements.push(
+        <Tag key={`${blockKey}-h-${i}`} className={`md-heading md-h${level}`}>
+          {parseInline(headingMatch[2], `${blockKey}-h-${i}`)}
+        </Tag>
+      );
+      i++; continue;
+    }
+
+    // Ordered list  1. item
+    if (/^\d+\.\s/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s/.test(lines[i])) {
+        const content = lines[i].replace(/^\s*\d+\.\s/, "");
+        items.push(<li key={`${blockKey}-li-${i}`}>{parseInline(content, `${blockKey}-li-${i}`)}</li>);
+        i++;
+      }
+      elements.push(<ol key={`${blockKey}-ol-${i}`} className="md-list md-ol">{items}</ol>);
+      continue;
+    }
+
+    // Unordered list  - item  or  * item
+    if (/^[-*]\s/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s/.test(lines[i])) {
+        const content = lines[i].replace(/^\s*[-*]\s/, "");
+        items.push(<li key={`${blockKey}-li-${i}`}>{parseInline(content, `${blockKey}-li-${i}`)}</li>);
+        i++;
+      }
+      elements.push(<ul key={`${blockKey}-ul-${i}`} className="md-list md-ul">{items}</ul>);
+      continue;
+    }
+
+    // Plain paragraph
+    elements.push(
+      <p key={`${blockKey}-p-${i}`} className="md-p">
+        {parseInline(trimmed, `${blockKey}-p-${i}`)}
+      </p>
+    );
+    i++;
+  }
+
+  return elements;
+}
+
+// ── Top-level renderer: splits on fenced code blocks first ───────────────────
 function renderMessageContent(content, onCopyCode) {
   const parts = content.split(/(```[\w]*\n[\s\S]*?```)/g);
   return parts.map((part, i) => {
@@ -57,19 +173,24 @@ function renderMessageContent(content, onCopyCode) {
       return (
         <div key={i} className="chat-code-block">
           <div className="chat-code-header">
-            <span className="chat-code-lang">{lang}</span>
-            <button type="button" className="chat-code-copy" onClick={() => onCopyCode(code)}>
-              Copy
-            </button>
+            <div className="chat-code-header-left">
+              <span className="chat-code-dot" />
+              <span className="chat-code-dot" />
+              <span className="chat-code-dot" />
+              <span className="chat-code-lang">{lang}</span>
+            </div>
+            <CopyButton code={code} onCopy={onCopyCode} />
           </div>
-          <pre className="chat-code-pre">{code}</pre>
+          <pre className="chat-code-pre"><code>{code}</code></pre>
         </div>
       );
     }
     if (!part.trim()) return null;
-    return part.split("\n").map((line, j) => (
-      <p key={`${i}-${j}`}>{line || "\u00a0"}</p>
-    ));
+    return (
+      <div key={i} className="chat-text-block">
+        {renderMarkdownBlock(part, `block-${i}`, onCopyCode)}
+      </div>
+    );
   });
 }
 
@@ -386,7 +507,24 @@ function App() {
               return;
             }
             if (data.error) {
-              throw new Error(data.error);
+              // Backend sent a structured error event — show a friendly in-chat message
+              const friendly = data.user_message || "Response generation failed. Please try again.";
+              setIsChatLoading(false);
+              if (!hasStartedAssistantMessage) {
+                setChatMessages(prev => [...prev, { role: "error", content: friendly }]);
+              } else {
+                // A partial response was already shown — append a note so it's clear it's incomplete
+                setChatMessages(prev => {
+                  if (prev.length === 0) return prev;
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last.role === "assistant") {
+                    updated[updated.length - 1] = { ...last, truncated: true };
+                  }
+                  return [...updated, { role: "error", content: friendly }];
+                });
+              }
+              return;
             }
           } catch (jsonErr) {
             // ignore malformed lines
@@ -396,21 +534,20 @@ function App() {
     } catch (err) {
       console.error("Chat stream error:", err);
       setIsChatLoading(false);
+      const friendly = "Connection error — could not reach the AI. Please check the backend and try again.";
       if (hasStartedAssistantMessage) {
+        // Mark the last partial message as truncated, then add an error bubble
         setChatMessages(prev => {
           if (prev.length === 0) return prev;
           const updated = [...prev];
           const last = updated[updated.length - 1];
           if (last.role === "assistant") {
-            updated[updated.length - 1] = {
-              ...last,
-              content: last.content + `\n\n[Chat Stream Error: ${err.message}]`
-            };
+            updated[updated.length - 1] = { ...last, truncated: true };
           }
-          return updated;
+          return [...updated, { role: "error", content: friendly }];
         });
       } else {
-        setChatMessages(prev => [...prev, { role: "assistant", content: `Failed to fetch response: ${err.message}` }]);
+        setChatMessages(prev => [...prev, { role: "error", content: friendly }]);
       }
     } finally {
       setIsChatLoading(false);
@@ -1401,8 +1538,17 @@ function App() {
 
         {isChatOpen && (
           <aside className="assistant-panel">
+            {/* ── Header ── */}
             <div className="assistant-header">
-              <span className="assistant-title">Assistant</span>
+              <div className="assistant-header-info">
+                <div className="assistant-avatar-sm">
+                  <IconSparkles />
+                </div>
+                <div>
+                  <span className="assistant-title">AI Assistant</span>
+                  <span className="assistant-status-dot" />
+                </div>
+              </div>
               <button
                 type="button"
                 className="icon-btn"
@@ -1412,6 +1558,8 @@ function App() {
                 <IconClose />
               </button>
             </div>
+
+            {/* ── Quick action chips ── */}
             <div className="assistant-quick-actions">
               <button
                 type="button"
@@ -1423,6 +1571,7 @@ function App() {
                   )
                 }
               >
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>
                 Explain
               </button>
               <button
@@ -1435,6 +1584,7 @@ function App() {
                   )
                 }
               >
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086ZM11.189 6.25 9.75 4.81l-6.286 6.287a.25.25 0 0 0-.064.108l-.558 1.953 1.953-.558a.249.249 0 0 0 .108-.064l6.286-6.286Z"/></svg>
                 Fix
               </button>
               <button
@@ -1447,50 +1597,94 @@ function App() {
                   )
                 }
               >
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Z"/></svg>
                 Docs
               </button>
             </div>
+
+            {/* ── Message list ── */}
             <div className="assistant-messages" ref={chatBodyRef}>
               {chatMessages.map((msg, i) => (
-                <div key={i} className={`chat-message ${msg.role}`}>
-                  <div className="chat-message-role">
-                    {msg.role === "user" ? "You" : "Assistant"}
+                msg.role === "user" ? (
+                  <div key={i} className="chat-row chat-row--user">
+                    <div className="chat-bubble chat-bubble--user">
+                      <div className="chat-bubble-text">{msg.content}</div>
+                    </div>
                   </div>
-                  <div className="chat-message-body">
-                    {renderMessageContent(msg.content, handleCopyCode)}
+                ) : msg.role === "error" ? (
+                  <div key={i} className="chat-row chat-row--system">
+                    <div className="chat-error-bubble">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" style={{flexShrink:0}}>
+                        <path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"/>
+                      </svg>
+                      {msg.content}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div key={i} className="chat-row chat-row--ai">
+                    <div className="chat-avatar">
+                      <IconSparkles />
+                    </div>
+                    <div className="chat-bubble chat-bubble--ai">
+                      {renderMessageContent(msg.content, handleCopyCode)}
+                      {msg.truncated && (
+                        <div className="chat-truncated-badge">
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm7-3.25v2.992l1.378 2.757a.75.75 0 0 1-1.356.638l-1.5-3A.75.75 0 0 1 7 7.75V4.75a.75.75 0 0 1 1.5 0Z"/>
+                          </svg>
+                          Response may be incomplete
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
               ))}
               {isChatLoading && (
-                <div className="chat-message assistant">
-                  <div className="chat-message-role">Assistant</div>
-                  <div className="chat-loading">Thinking…</div>
+                <div className="chat-row chat-row--ai">
+                  <div className="chat-avatar">
+                    <IconSparkles />
+                  </div>
+                  <div className="chat-bubble chat-bubble--ai chat-bubble--loading">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                  </div>
                 </div>
               )}
             </div>
+
+            {/* ── Input area ── */}
             <form className="assistant-input-row" onSubmit={handleSendChatMessage}>
-              <input
-                type="text"
-                className="assistant-input"
-                value={chatInputValue}
-                onChange={(e) => setChatInputValue(e.target.value)}
-                placeholder="Ask about your code… (Ctrl+Enter to send)"
-                disabled={isChatLoading}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                    handleSendChatMessage(e);
-                  }
-                }}
-              />
-              <button
-                type="submit"
-                className="assistant-send"
-                disabled={!chatInputValue.trim() || isChatLoading}
-              >
-                Send
-              </button>
+              <div className="assistant-input-wrap">
+                <textarea
+                  className="assistant-input"
+                  value={chatInputValue}
+                  rows={1}
+                  onChange={(e) => {
+                    setChatInputValue(e.target.value);
+                    e.target.style.height = "auto";
+                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+                  }}
+                  placeholder="Ask about your code…"
+                  disabled={isChatLoading}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendChatMessage(e);
+                    }
+                  }}
+                />
+                <button
+                  type="submit"
+                  className="assistant-send"
+                  disabled={!chatInputValue.trim() || isChatLoading}
+                  title="Send (Enter)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M.989 8 .064 2.68a1.342 1.342 0 0 1 1.88-1.485l11.985 5.855a1.342 1.342 0 0 1 0 2.4L1.944 15.304a1.342 1.342 0 0 1-1.88-1.484Z"/></svg>
+                </button>
+              </div>
+              <p className="assistant-footer">Enter to send · Shift+Enter for new line</p>
             </form>
-            <p className="assistant-footer">AI can make mistakes. Verify important changes.</p>
           </aside>
         )}
       </div>
