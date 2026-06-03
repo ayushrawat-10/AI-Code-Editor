@@ -390,14 +390,32 @@ button:disabled {
 
 /* ── Sidebar ── */
 .sidebar {
-  width: var(--sidebar-w);
+  /* width controlled by inline style (drag-resizable) */
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  min-width: 180px;
+  position: relative;       /* needed to position the resizer */
   overflow: hidden;
+}
+
+/* Right-edge resizer on the sidebar */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 20;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer.dragging {
+  background: var(--accent);
 }
 
 .sidebar-header {
@@ -952,14 +970,37 @@ body.dragging-panel-active {
 
 /* ── Assistant panel ── */
 .assistant-panel {
-  width: var(--assistant-w);
+  /* width controlled by inline style (drag-resizable) */
   background: var(--bg-sidebar);
   border-left: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  min-width: 280px;
+  position: relative;       /* needed to position the resizer */
   overflow: hidden;
+}
+
+/* Left-edge resizer on the assistant panel */
+.assistant-resizer {
+  position: absolute;
+  top: 0;
+  left: -2px;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 20;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.assistant-resizer:hover,
+.assistant-resizer.dragging {
+  background: var(--accent);
+}
+
+body.dragging-col-active {
+  user-select: none !important;
+  cursor: col-resize !important;
 }
 
 .assistant-header {
@@ -1163,6 +1204,22 @@ body.dragging-panel-active {
 
 .chat-bubble--user .chat-bubble-text {
   white-space: pre-wrap;
+}
+
+/* ── Quick-action badge inside user bubble ── */
+.chat-quick-action-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 2px 7px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 /* ── Error bubble (system/error messages) ── */

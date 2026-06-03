@@ -349,6 +349,12 @@ function App() {
   const [terminalHeight, setTerminalHeight] = useState(200);
   const [isDraggingTerminal, setIsDraggingTerminal] = useState(false);
 
+  // Sidebar and assistant panel horizontal resize
+  const [sidebarWidth, setSidebarWidth] = useState(260);
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
+  const [assistantWidth, setAssistantWidth] = useState(360);
+  const [isDraggingAssistant, setIsDraggingAssistant] = useState(false);
+
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState([
     {
@@ -415,6 +421,64 @@ function App() {
     };
   }, [isDraggingTerminal]);
 
+  // ── Sidebar horizontal resize ─────────────────────────────────────────────
+  const handleSidebarResizerMouseDown = useCallback((e) => {
+    e.preventDefault();
+    setIsDraggingSidebar(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isDraggingSidebar) {
+      document.body.classList.remove("dragging-col-active");
+      return;
+    }
+    document.body.classList.add("dragging-col-active");
+    const handleMouseMove = (e) => {
+      // sidebar starts right after the activity bar (48 px)
+      const newWidth = e.clientX - 48;
+      const min = 160;
+      const max = window.innerWidth * 0.4;
+      if (newWidth >= min && newWidth <= max) setSidebarWidth(newWidth);
+    };
+    const handleMouseUp = () => setIsDraggingSidebar(false);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.body.classList.remove("dragging-col-active");
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDraggingSidebar]);
+
+  // ── Assistant panel horizontal resize ────────────────────────────────────
+  const handleAssistantResizerMouseDown = useCallback((e) => {
+    e.preventDefault();
+    setIsDraggingAssistant(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isDraggingAssistant) {
+      document.body.classList.remove("dragging-col-active");
+      return;
+    }
+    document.body.classList.add("dragging-col-active");
+    const handleMouseMove = (e) => {
+      // assistant panel right-aligns: width = window right edge - mouse X
+      const newWidth = window.innerWidth - e.clientX;
+      const min = 260;
+      const max = window.innerWidth * 0.5;
+      if (newWidth >= min && newWidth <= max) setAssistantWidth(newWidth);
+    };
+    const handleMouseUp = () => setIsDraggingAssistant(false);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.body.classList.remove("dragging-col-active");
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDraggingAssistant]);
+
   const handleSaveFile = useCallback(() => {
     if (!activeFile) return;
     setTerminalLines(prev => [
@@ -439,12 +503,15 @@ function App() {
     });
   }, [activeFile]);
 
-  const handleSendChatMessage = useCallback(async (e, overrideMessage) => {
+  const handleSendChatMessage = useCallback(async (e, overrideMessage, displayMessage) => {
     if (e) e.preventDefault();
     const query = (overrideMessage ?? chatInputValue).trim();
     if (!query || isChatLoading) return;
 
-    setChatMessages((prev) => [...prev, { role: "user", content: query }]);
+    // What we SHOW in the chat bubble (short label for quick actions, full text for typed input)
+    const visibleText = displayMessage ?? query;
+
+    setChatMessages((prev) => [...prev, { role: "user", content: visibleText, isQuickAction: !!displayMessage }]);
     setChatInputValue("");
     setIsChatLoading(true);
 
@@ -455,7 +522,7 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: query,
+          message: query,          // full prompt with code goes to backend
           code: currentCodeRef.current,
           filename: activeFile || "main.py"
         })
@@ -1157,9 +1224,11 @@ function App() {
   }, []);
 
   const handleQuickAction = useCallback(
-    (prompt) => {
+    (label, prompt) => {
       setIsChatOpen(true);
-      handleSendChatMessage(null, prompt);
+      // label = short text shown in chat bubble
+      // prompt = full instruction + code sent to the backend
+      handleSendChatMessage(null, prompt, label);
     },
     [handleSendChatMessage],
   );
@@ -1377,7 +1446,16 @@ function App() {
         </nav>
 
         {isSidebarOpen && (
-          <aside className="sidebar">
+          <aside
+            className="sidebar"
+            style={{ width: sidebarWidth, minWidth: sidebarWidth }}
+          >
+            {/* Right-edge resizer */}
+            <div
+              className={`sidebar-resizer ${isDraggingSidebar ? "dragging" : ""}`}
+              onMouseDown={handleSidebarResizerMouseDown}
+              title="Drag to resize"
+            />
             <div className="sidebar-header">
               <span className="sidebar-title">Explorer</span>
               <div className="sidebar-tools">
@@ -1537,7 +1615,16 @@ function App() {
         </div>
 
         {isChatOpen && (
-          <aside className="assistant-panel">
+          <aside
+            className="assistant-panel"
+            style={{ width: assistantWidth, minWidth: assistantWidth }}
+          >
+            {/* Left-edge resizer */}
+            <div
+              className={`assistant-resizer ${isDraggingAssistant ? "dragging" : ""}`}
+              onMouseDown={handleAssistantResizerMouseDown}
+              title="Drag to resize"
+            />
             {/* ── Header ── */}
             <div className="assistant-header">
               <div className="assistant-header-info">
@@ -1567,7 +1654,8 @@ function App() {
                 disabled={isChatLoading}
                 onClick={() =>
                   handleQuickAction(
-                    `Explain the following code clearly and concisely:\n\n${currentCodeRef.current}`,
+                    `Explain ‘${activeFile || "this file"}’`,
+                    `Explain the following code clearly and concisely. Describe what it does, how it works, and any key patterns used:\n\n${currentCodeRef.current}`,
                   )
                 }
               >
@@ -1580,7 +1668,8 @@ function App() {
                 disabled={isChatLoading}
                 onClick={() =>
                   handleQuickAction(
-                    `Find bugs and fix this code. Return the corrected version:\n\n${currentCodeRef.current}`,
+                    `Fix bugs in ‘${activeFile || "this file"}’`,
+                    `Find all bugs and issues in the following code and return the corrected version with a brief explanation of each fix:\n\n${currentCodeRef.current}`,
                   )
                 }
               >
@@ -1593,7 +1682,8 @@ function App() {
                 disabled={isChatLoading}
                 onClick={() =>
                   handleQuickAction(
-                    `Generate documentation (docstrings/comments) for this code:\n\n${currentCodeRef.current}`,
+                    `Generate docs for ‘${activeFile || "this file"}’`,
+                    `Generate complete documentation for the following code. Add docstrings to all functions/classes and inline comments for non-obvious logic:\n\n${currentCodeRef.current}`,
                   )
                 }
               >
@@ -1608,6 +1698,14 @@ function App() {
                 msg.role === "user" ? (
                   <div key={i} className="chat-row chat-row--user">
                     <div className="chat-bubble chat-bubble--user">
+                      {msg.isQuickAction && (
+                        <div className="chat-quick-action-badge">
+                          <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M9.504.43a1.516 1.516 0 0 1 2.437 1.713L9.232 6h2.686a1 1 0 0 1 .896 1.45l-3.28 7.5a1.516 1.516 0 0 1-2.821-1.04l1.34-4.01H4.756a1 1 0 0 1-.897-1.45l3.527-7.5a1.516 1.516 0 0 1 2.118-.52Z"/>
+                          </svg>
+                          Quick action
+                        </div>
+                      )}
                       <div className="chat-bubble-text">{msg.content}</div>
                     </div>
                   </div>
