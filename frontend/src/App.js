@@ -1,6 +1,20 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import Editor from "@monaco-editor/react";
 import "./App.css";
+import { buildFileTree, getSortedChildren, getAllFolderPaths, getBaseName } from "./fileTree";
+import {
+  IconFiles,
+  IconSparkles,
+  IconSettings,
+  IconPlay,
+  IconStop,
+  IconClose,
+  IconNewFile,
+  IconRefresh,
+  IconChevronRight,
+  IconChevronDown,
+  IconFolder,
+} from "./icons";
 
 const BACKEND_URL = "http://localhost:8000";
 
@@ -25,14 +39,39 @@ function getOverlapLength(linePrefix, suggestion) {
 }
 
 // ── Default starter code ─────────────────────────────────────────────────────
-const DEFAULT_CODE = `# Welcome to AI Code Editor 🚀
-# Start writing Python code below
+const DEFAULT_CODE = `# Welcome — start writing Python below
 
 def greet(name):
     print(f"Hello, {name}!")
 
 greet("World")
 `;
+
+function renderMessageContent(content, onCopyCode) {
+  const parts = content.split(/(```[\w]*\n[\s\S]*?```)/g);
+  return parts.map((part, i) => {
+    const fence = part.match(/^```(\w*)\n([\s\S]*)```$/);
+    if (fence) {
+      const lang = fence[1] || "code";
+      const code = fence[2].replace(/\n$/, "");
+      return (
+        <div key={i} className="chat-code-block">
+          <div className="chat-code-header">
+            <span className="chat-code-lang">{lang}</span>
+            <button type="button" className="chat-code-copy" onClick={() => onCopyCode(code)}>
+              Copy
+            </button>
+          </div>
+          <pre className="chat-code-pre">{code}</pre>
+        </div>
+      );
+    }
+    if (!part.trim()) return null;
+    return part.split("\n").map((line, j) => (
+      <p key={`${i}-${j}`}>{line || "\u00a0"}</p>
+    ));
+  });
+}
 
 // ── Global abort controller so we can cancel in-flight streams ───────────────
 let activeAbortController = null;
@@ -77,7 +116,7 @@ function getLanguageLabel(fileName) {
 }
 
 function getLanguageFileIcon(fileName) {
-  if (!fileName) return <span className="file-lang-icon default">📄</span>;
+  if (!fileName) return <span className="file-lang-icon default">··</span>;
   const ext = fileName.split(".").pop().toLowerCase();
   switch (ext) {
     case "html":
@@ -101,7 +140,7 @@ function getLanguageFileIcon(fileName) {
     case "md":
       return <span className="file-lang-icon md">ℹ</span>;
     default:
-      return <span className="file-lang-icon default">📄</span>;
+      return <span className="file-lang-icon default">··</span>;
   }
 }
 
@@ -152,6 +191,7 @@ function App() {
     "main.py": DEFAULT_CODE
   });
   const [activeFile, setActiveFile] = useState("main.py");
+  const [openTabs, setOpenTabs] = useState(["main.py"]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isCreatingFile, setIsCreatingFile] = useState(false);
   const [newFileName, setNewFileName] = useState("");
@@ -163,9 +203,12 @@ function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [hasGhost, setHasGhost] = useState(false);  // for UI badges
   const [terminalLines, setTerminalLines] = useState([
-    { type: "info", text: "Terminal ready. Click Run to execute your code." },
+    { type: "info", text: "Ready. Press Run or F5 to execute the active file." },
   ]);
   const [isTerminalMinimized, setIsTerminalMinimized] = useState(false);
+  const [panelTab, setPanelTab] = useState("terminal");
+  const [cursorPosition, setCursorPosition] = useState({ line: 1, column: 1 });
+  const [expandedFolders, setExpandedFolders] = useState(() => new Set());
 
   const terminalBodyRef = useRef(null);
   const editorRef = useRef(null);
@@ -182,15 +225,16 @@ function App() {
   const isCreatingFileCancelingRef = useRef(false);
   const isRenameCancelingRef = useRef(false);
 
-  const [isProjectExpanded, setIsProjectExpanded] = useState(true);
-  const [isSrcExpanded, setIsSrcExpanded] = useState(true);
-
-  const [terminalHeight, setTerminalHeight] = useState(220);
+  const [terminalHeight, setTerminalHeight] = useState(200);
   const [isDraggingTerminal, setIsDraggingTerminal] = useState(false);
 
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState([
-    { role: "assistant", content: "Hello! I am your AI assistant. Ask me anything about your current code file!" }
+    {
+      role: "assistant",
+      content:
+        "Ask about your open file, or use Explain / Fix / Docs above. Inline completions appear as you type — press Tab to accept.",
+    },
   ]);
   const [chatInputValue, setChatInputValue] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -203,6 +247,17 @@ function App() {
     }
   }, [chatMessages, isChatOpen]);
 
+  const filePaths = useMemo(() => Object.keys(files).sort(), [files]);
+  const fileTree = useMemo(() => buildFileTree(filePaths), [filePaths]);
+
+  useEffect(() => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      getAllFolderPaths(filePaths).forEach((p) => next.add(p));
+      return next;
+    });
+  }, [filePaths]);
+
   const handleResizerMouseDown = useCallback((e) => {
     e.preventDefault();
     setIsDraggingTerminal(true);
@@ -210,11 +265,11 @@ function App() {
 
   useEffect(() => {
     if (!isDraggingTerminal) {
-      document.body.classList.remove("dragging-terminal-active");
+      document.body.classList.remove("dragging-panel-active");
       return;
     }
 
-    document.body.classList.add("dragging-terminal-active");
+    document.body.classList.add("dragging-panel-active");
 
     const handleMouseMove = (e) => {
       const newHeight = window.innerHeight - e.clientY;
@@ -233,7 +288,7 @@ function App() {
     window.addEventListener("mouseup", handleMouseUp);
 
     return () => {
-      document.body.classList.remove("dragging-terminal-active");
+      document.body.classList.remove("dragging-panel-active");
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
@@ -263,13 +318,12 @@ function App() {
     });
   }, [activeFile]);
 
-  const handleSendChatMessage = useCallback(async (e) => {
+  const handleSendChatMessage = useCallback(async (e, overrideMessage) => {
     if (e) e.preventDefault();
-    const query = chatInputValue.trim();
+    const query = (overrideMessage ?? chatInputValue).trim();
     if (!query || isChatLoading) return;
 
-    // Append user message
-    setChatMessages(prev => [...prev, { role: "user", content: query }]);
+    setChatMessages((prev) => [...prev, { role: "user", content: query }]);
     setChatInputValue("");
     setIsChatLoading(true);
 
@@ -574,23 +628,39 @@ function App() {
   // ── File Explorer callbacks ────────────────────────────────────────────────
   const handleFileSelect = useCallback((fileName) => {
     const currentVal = currentCodeRef.current;
-    
-    // Atomic state batching to prevent async lag discrepancies
-    setFiles(prev => {
-      const updated = {
-        ...prev,
-        [activeFile]: currentVal
-      };
-      
+
+    setFiles((prev) => {
+      const updated = { ...prev, [activeFile]: currentVal };
       const newContent = updated[fileName] ?? "";
       setCode(newContent);
       currentCodeRef.current = newContent;
       return updated;
     });
-    
+
     setActiveFile(fileName);
+    setOpenTabs((prev) => (prev.includes(fileName) ? prev : [...prev, fileName]));
     clearGhost();
   }, [activeFile, clearGhost]);
+
+  const handleCloseTab = useCallback(
+    (fileName, e) => {
+      e.stopPropagation();
+      setOpenTabs((prev) => {
+        const idx = prev.indexOf(fileName);
+        const next = prev.filter((f) => f !== fileName);
+        if (activeFile === fileName && next.length > 0) {
+          const newActive = next[Math.min(idx, next.length - 1)];
+          handleFileSelect(newActive);
+        } else if (activeFile === fileName && next.length === 0) {
+          setActiveFile("");
+          setCode("");
+          currentCodeRef.current = "";
+        }
+        return next;
+      });
+    },
+    [activeFile, handleFileSelect],
+  );
 
   const handleCreateFileSubmit = useCallback(() => {
     setIsCreatingFile(false);
@@ -625,6 +695,7 @@ function App() {
     });
     
     setActiveFile(trimmed);
+    setOpenTabs((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
     clearGhost();
   }, [activeFile, newFileName, files, clearGhost]);
 
@@ -671,9 +742,8 @@ function App() {
       return updated;
     });
     
-    if (activeFile === oldName) {
-      setActiveFile(trimmed);
-    }
+    if (activeFile === oldName) setActiveFile(trimmed);
+    setOpenTabs((prev) => prev.map((f) => (f === oldName ? trimmed : f)));
   }, [renameInputValue, files, activeFile, editingFileName]);
 
   const handleRenameKeyDown = useCallback((e, oldName) => {
@@ -692,11 +762,9 @@ function App() {
     const confirmDelete = window.confirm(`Are you sure you want to delete "${fileName}"?`);
     if (!confirmDelete) return;
     
-    setFiles(prev => {
+    setFiles((prev) => {
       const updated = { ...prev };
       delete updated[fileName];
-      
-      // Auto switch active file if we deleted the current active file
       if (activeFile === fileName) {
         const remaining = Object.keys(updated);
         if (remaining.length > 0) {
@@ -712,6 +780,7 @@ function App() {
       }
       return updated;
     });
+    setOpenTabs((prev) => prev.filter((f) => f !== fileName));
     clearGhost();
   }, [activeFile, clearGhost]);
 
@@ -742,20 +811,26 @@ function App() {
       editorRef.current = editor;
       monacoRef.current = monaco;
 
-      // Define custom purple workspace theme matching styling mockup
-      monaco.editor.defineTheme('custom-purple-theme', {
-        base: 'vs-dark',
+      monaco.editor.defineTheme("workbench-dark", {
+        base: "vs-dark",
         inherit: true,
         rules: [],
         colors: {
-          'editor.background': '#141328',
-          'editor.lineHighlightBackground': '#201e3b',
-          'editorGutter.background': '#141328',
-          'editor.selectionBackground': '#3e3a72',
-          'editor.inactiveSelectionBackground': '#262447',
-        }
+          "editor.background": "#1e1e1e",
+          "editor.lineHighlightBackground": "#2a2d2e",
+          "editorGutter.background": "#1e1e1e",
+          "editor.selectionBackground": "#264f78",
+          "editor.inactiveSelectionBackground": "#3a3d41",
+        },
       });
-      monaco.editor.setTheme('custom-purple-theme');
+      monaco.editor.setTheme("workbench-dark");
+
+      editor.onDidChangeCursorPosition((e) => {
+        setCursorPosition({
+          line: e.position.lineNumber,
+          column: e.position.column,
+        });
+      });
 
       // Register Monaco's native inline completions provider for all supported languages.
       const SUPPORTED_LANGUAGES = ["python", "cpp", "c", "html", "javascript", "css", "rust"];
@@ -923,6 +998,44 @@ function App() {
 
   const clearTerminal = () => setTerminalLines([]);
 
+  const runCodeRef = useRef(handleRunCode);
+  const stopCodeRef = useRef(handleStopCode);
+  runCodeRef.current = handleRunCode;
+  stopCodeRef.current = handleStopCode;
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === "F5") {
+        e.preventDefault();
+        if (isRunning) stopCodeRef.current();
+        else if (activeFile) runCodeRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isRunning, activeFile]);
+
+  const handleCopyCode = useCallback((text) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }, []);
+
+  const handleQuickAction = useCallback(
+    (prompt) => {
+      setIsChatOpen(true);
+      handleSendChatMessage(null, prompt);
+    },
+    [handleSendChatMessage],
+  );
+
+  const toggleFolder = useCallback((folderPath) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderPath)) next.delete(folderPath);
+      else next.add(folderPath);
+      return next;
+    });
+  }, []);
+
   // ── Monaco editor options ─────────────────────────────────────────────────
   const editorOptions = {
     fontSize: 14,
@@ -935,8 +1048,8 @@ function App() {
     cursorBlinking: "smooth",
     cursorSmoothCaretAnimation: "on",
     smoothScrolling: true,
-    padding: { top: 16, bottom: 16 },
-    tabSize: 4,
+    padding: { top: 8, bottom: 8 },
+    tabSize: 2,
     wordWrap: "on",
     automaticLayout: true,
     quickSuggestions: false,
@@ -946,177 +1059,215 @@ function App() {
     readOnly: !activeFile,
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
-  const fileNames = Object.keys(files);
-  const srcFiles = fileNames.filter(name => !name.endsWith(".md"));
-  const rootFiles = fileNames.filter(name => name.endsWith(".md"));
+  const statusMessage = isRunning
+    ? "Running…"
+    : isSyncing
+      ? "AI suggesting…"
+      : hasGhost
+        ? "Suggestion ready — Tab to accept"
+        : "Ready";
 
-  const renderFileItem = (fileName) => {
+  const renderFileItem = (fileName, depth = 0) => {
     const isActive = fileName === activeFile;
-    return editingFileName === fileName ? (
-      <div key={fileName} className="file-item rename-mode" onClick={(e) => e.stopPropagation()}>
-        {getLanguageFileIcon(fileName)}
-        <input
-          type="text"
-          className="file-rename-input"
-          value={renameInputValue}
-          onChange={(e) => setRenameInputValue(e.target.value)}
-          onKeyDown={(e) => handleRenameKeyDown(e, fileName)}
-          onBlur={() => handleRenameSubmit(fileName)}
-          autoFocus
-        />
-      </div>
-    ) : (
+    const pad = depth * 12 + 24;
+    if (editingFileName === fileName) {
+      return (
+        <div
+          key={fileName}
+          className="file-item rename-mode"
+          style={{ paddingLeft: pad }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {getLanguageFileIcon(fileName)}
+          <input
+            type="text"
+            className="file-rename-input"
+            value={renameInputValue}
+            onChange={(e) => setRenameInputValue(e.target.value)}
+            onKeyDown={(e) => handleRenameKeyDown(e, fileName)}
+            onBlur={() => handleRenameSubmit(fileName)}
+            autoFocus
+          />
+        </div>
+      );
+    }
+    return (
       <div
         key={fileName}
         className={`file-item ${isActive ? "active" : ""}`}
+        style={{ paddingLeft: pad }}
         onClick={() => handleFileSelect(fileName)}
       >
+        <span className="tree-caret" aria-hidden />
         {getLanguageFileIcon(fileName)}
-        <span className="file-name">{fileName}</span>
+        <span className="file-name" title={fileName}>
+          {getBaseName(fileName)}
+        </span>
         <div className="file-actions">
           <button
-            className="file-action-btn rename"
+            type="button"
+            className="file-action-btn"
             onClick={(e) => handleRenameStart(fileName, e)}
-            title="Rename File"
+            title="Rename"
           >
-            ✏️
+            Ren
           </button>
           <button
-            className="file-action-btn download"
+            type="button"
+            className="file-action-btn"
             onClick={(e) => handleDownloadFile(fileName, e)}
-            title="Download File"
+            title="Download"
           >
-            📥
+            Dl
           </button>
           <button
-            className="file-action-btn delete"
+            type="button"
+            className="file-action-btn danger"
             onClick={(e) => handleDeleteFile(fileName, e)}
-            title="Delete File"
+            title="Delete"
           >
-            🗑️
+            Del
           </button>
         </div>
       </div>
     );
   };
 
+  const renderExplorerNodes = (folderNode, depth = 0) =>
+    getSortedChildren(folderNode).map((node) => {
+      if (node.type === "folder") {
+        const expanded = expandedFolders.has(node.fullPath);
+        return (
+          <React.Fragment key={`dir-${node.fullPath}`}>
+            <div
+              className="tree-folder-row"
+              style={{ paddingLeft: depth * 12 + 8 }}
+              onClick={() => toggleFolder(node.fullPath)}
+            >
+              <span className="tree-caret">
+                {expanded ? <IconChevronDown /> : <IconChevronRight />}
+              </span>
+              <span className="tree-folder-icon">
+                <IconFolder />
+              </span>
+              <span className="file-name">{node.name}</span>
+            </div>
+            {expanded && renderExplorerNodes(node, depth + 1)}
+          </React.Fragment>
+        );
+      }
+      return renderFileItem(node.fullPath, depth);
+    });
+
   return (
     <div className="app-shell">
 
-      {/* ── Header / Toolbar ── */}
-      <header className="app-header">
-        <div className="header-left">
-          <div className="app-logo">⚡</div>
-          <h1 className="app-title">AI<span>-Code-Editor</span></h1>
-          <div className="project-selector" title="Select Project Directory">
-            <span>My Project</span>
-            <span className="dropdown-caret">▼</span>
-          </div>
+      <header className="titlebar">
+        <div className="titlebar-left">
+          <span className="app-brand">CodeLab</span>
+          <nav className="titlebar-menu" aria-label="Main menu">
+            <button type="button" className="menu-item" onClick={handleSaveFile} title="Save file">
+              File
+            </button>
+            <button
+              type="button"
+              className="menu-item menu-item--run"
+              onClick={isRunning ? handleStopCode : handleRunCode}
+              title={isRunning ? "Stop (F5)" : "Run (F5)"}
+            >
+              {isRunning ? "Stop" : "Run"}
+            </button>
+            <button type="button" className="menu-item" onClick={handleShareFile} title="Copy code to clipboard">
+              Share
+            </button>
+          </nav>
         </div>
-
-        <div className="header-center">
-          <button className="header-action-btn save" onClick={handleSaveFile} title="Save current file in-memory">
-            <span className="btn-icon">💾</span> Save
-          </button>
+        <div className="titlebar-right">
           <button
+            type="button"
             id="run-code-btn"
-            className={`header-action-btn run ${isRunning ? "running" : ""}`}
+            className={`titlebar-btn primary-run ${isRunning ? "running" : ""}`}
             onClick={isRunning ? handleStopCode : handleRunCode}
-            title={isRunning ? "Stop execution" : "Run current program"}
+            title={isRunning ? "Stop (F5)" : "Run (F5)"}
+            aria-pressed={isRunning}
           >
-            <span className="btn-icon">{isRunning ? "⏹" : "▶"}</span>
+            {isRunning ? <IconStop /> : <IconPlay />}
             {isRunning ? "Stop" : "Run"}
           </button>
-          <button className="header-action-btn share" onClick={handleShareFile} title="Share code snippet">
-            <span className="btn-icon">🔗</span> Share
-          </button>
-        </div>
-
-        <div className="header-right">
-          {isSyncing && (
-            <span className="ai-thinking-badge">
-              <span className="ai-dot" />
-              AI thinking…
-            </span>
-          )}
-          {hasGhost && !isSyncing && (
-            <span className="ai-ready-badge">
-              <span className="ai-ready-dot" />
-              Suggestion ready · <kbd>Tab</kbd> to accept
-            </span>
-          )}
-          <span className="lang-badge">{getLanguageLabel(activeFile)}</span>
-          <button 
-            className={`header-action-btn chat-toggle ${isChatOpen ? "active" : ""}`}
-            onClick={() => setIsChatOpen(prev => !prev)}
-            title="Toggle AI Assistant Chat Pane"
-            style={{ marginLeft: 8 }}
+          <button
+            type="button"
+            className={`titlebar-btn titlebar-btn--assist ${isChatOpen ? "active" : ""}`}
+            onClick={() => setIsChatOpen((prev) => !prev)}
+            title="Toggle AI Assistant"
+            aria-pressed={isChatOpen}
           >
-            <span className="btn-icon">✨</span> AI Chat
+            <IconSparkles />
+            Assistant
           </button>
         </div>
       </header>
 
-      {/* ── Main Workspace ── */}
       <div className="workspace">
-
-        {/* Activity bar */}
         <nav className="activity-bar" aria-label="Activity Bar">
-          <div
-            className={`activity-icon ${isSidebarOpen ? "active" : ""}`}
+          <button
+            type="button"
+            className={`activity-btn ${isSidebarOpen ? "active" : ""}`}
             title="Explorer"
-            onClick={() => setIsSidebarOpen(prev => !prev)}
+            onClick={() => setIsSidebarOpen((prev) => !prev)}
+            aria-pressed={isSidebarOpen}
           >
-            📁
+            <IconFiles />
+          </button>
+          <button
+            type="button"
+            className={`activity-btn activity-btn--assist ${isChatOpen ? "active" : ""}`}
+            title="AI Assistant"
+            onClick={() => setIsChatOpen((prev) => !prev)}
+            aria-pressed={isChatOpen}
+          >
+            <IconSparkles />
+          </button>
+          <div className="activity-bar-bottom">
+            <button
+              type="button"
+              className="activity-btn"
+              title="Settings"
+              onClick={() => setIsSidebarOpen((prev) => !prev)}
+            >
+              <IconSettings />
+            </button>
           </div>
-          <div className="activity-icon" title="Search">🔍</div>
-          <div className="activity-icon" title="AI Suggestions">✨</div>
-          <div className="activity-icon" title="Settings">⚙️</div>
         </nav>
 
-        {/* File Explorer Sidebar */}
         {isSidebarOpen && (
-          <div className="sidebar">
+          <aside className="sidebar">
             <div className="sidebar-header">
-              <span>EXPLORER</span>
+              <span className="sidebar-title">Explorer</span>
               <div className="sidebar-tools">
                 <button
-                  className="new-file-btn"
+                  type="button"
+                  className="icon-btn"
                   onClick={() => setIsCreatingFile(true)}
-                  title="New File"
+                  title="New file (use paths like src/app.py)"
                 >
-                  📄+
+                  <IconNewFile />
                 </button>
                 <button
-                  className="new-file-btn"
-                  onClick={() => alert("Directories are managed dynamically! You can create nested paths directly by adding names like 'src/helper.py'!")}
-                  title="New Folder"
+                  type="button"
+                  className="icon-btn"
+                  onClick={() => setIsCreatingFile(true)}
+                  title="New file in folder — type path in name"
                 >
-                  📁+
+                  <IconFolder />
                 </button>
-                <button
-                  className="new-file-btn"
-                  onClick={() => {
-                    clearGhost();
-                    if (activeFile) {
-                      setTerminalLines(prev => [
-                        ...prev,
-                        { type: "info", text: "⟳ Explorer listing refreshed successfully." }
-                      ]);
-                    }
-                  }}
-                  title="Refresh Explorer"
-                >
-                  ↻
+                <button type="button" className="icon-btn" title="Refresh" onClick={clearGhost}>
+                  <IconRefresh />
                 </button>
               </div>
             </div>
-            
             <div className="sidebar-content">
               {isCreatingFile && (
-                <div className="new-file-input-wrapper" style={{ marginLeft: isSrcExpanded && isProjectExpanded ? "32px" : "16px" }}>
-                  <span className="file-icon">📄</span>
+                <div className="new-file-input-wrapper">
                   <input
                     type="text"
                     className="new-file-input"
@@ -1124,102 +1275,64 @@ function App() {
                     onChange={(e) => setNewFileName(e.target.value)}
                     onKeyDown={handleNewFileKeyDown}
                     onBlur={handleCreateFileSubmit}
-                    placeholder="file.py"
+                    placeholder="main.py or src/app.py"
                     autoFocus
                   />
                 </div>
               )}
-              
               <div className="explorer-tree">
-                {/* MY PROJECT Folder Root */}
-                <div 
-                  className={`tree-folder-node ${isProjectExpanded ? "expanded" : ""}`}
-                  onClick={() => setIsProjectExpanded(prev => !prev)}
-                >
-                  <span className="folder-caret">{isProjectExpanded ? "▼" : "▶"}</span>
-                  <span className="folder-icon">📁</span>
-                  <span className="folder-name">MY PROJECT</span>
-                </div>
-
-                {isProjectExpanded && (
-                  <div className="tree-folder-contents">
-                    {/* src Folder Node */}
-                    <div 
-                      className={`tree-folder-node ${isSrcExpanded ? "expanded" : ""}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsSrcExpanded(prev => !prev);
-                      }}
-                      style={{ paddingLeft: "16px" }}
-                    >
-                      <span className="folder-caret">{isSrcExpanded ? "▼" : "▶"}</span>
-                      <span className="folder-icon">📁</span>
-                      <span className="folder-name">src</span>
-                    </div>
-
-                    {isSrcExpanded && (
-                      <div className="tree-folder-contents" style={{ paddingLeft: "24px" }}>
-                        {srcFiles.length === 0 ? (
-                          <div className="empty-folder-label">(empty)</div>
-                        ) : (
-                          srcFiles.map(fileName => renderFileItem(fileName))
-                        )}
-                      </div>
-                    )}
-
-                    {/* Root Flat Files (e.g. README.md) */}
-                    <div className="tree-flat-files" style={{ paddingLeft: "16px", marginTop: "4px" }}>
-                      {rootFiles.map(fileName => renderFileItem(fileName))}
-                    </div>
-                  </div>
+                {filePaths.length === 0 ? (
+                  <p className="empty-tree-hint">No files. Create one with +</p>
+                ) : (
+                  renderExplorerNodes(fileTree)
                 )}
               </div>
             </div>
-          </div>
+          </aside>
         )}
 
-        {/* Editor + Terminal */}
         <div className="editor-terminal-pane">
-
-          {/* Editor section */}
           <section className="editor-section">
-            <div className="editor-gutter">
-              <div className="editor-gutter-left">
-                <span className="editor-breadcrumb">
-                  {activeFile ? (
-                    <>
-                      <span className="breadcrumb-path">src</span>
-                      <span className="breadcrumb-separator">&gt;</span>
-                      {getLanguageFileIcon(activeFile)}
-                      <span className="file-name">{activeFile}</span>
-                      <span className="breadcrumb-separator">&gt;</span>
-                      <span className="breadcrumb-ellipsis">...</span>
-                    </>
-                  ) : (
-                    <span>workspace / (no file open)</span>
-                  )}
-                </span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span>Ln {activeFile ? code.split("\n").length : 0}, Col 1</span>
-                {activeFile && (
+            {openTabs.length > 0 ? (
+              <div className="editor-tabs" role="tablist">
+                {openTabs.map((tabPath) => (
                   <button
-                    className="editor-download-btn"
-                    onClick={(e) => handleDownloadFile(activeFile, e)}
-                    title="Download Current File"
+                    key={tabPath}
+                    type="button"
+                    role="tab"
+                    className={`editor-tab ${tabPath === activeFile ? "active" : ""}`}
+                    onClick={() => handleFileSelect(tabPath)}
+                    title={tabPath}
                   >
-                    📥 Download
+                    {getLanguageFileIcon(tabPath)}
+                    <span className="editor-tab-label">{getBaseName(tabPath)}</span>
+                    <span className="editor-tab-dirty" aria-hidden />
+                    <span
+                      className="editor-tab-close"
+                      role="button"
+                      tabIndex={-1}
+                      onClick={(e) => handleCloseTab(tabPath, e)}
+                      title="Close"
+                    >
+                      <IconClose />
+                    </span>
                   </button>
-                )}
+                ))}
               </div>
-            </div>
+            ) : (
+              <div className="editor-tabs-empty">Open a file from the explorer</div>
+            )}
 
             <div className="editor-wrapper">
               <Editor
                 height="100%"
                 language={activeFile ? getLanguageFromExtension(activeFile) : "python"}
                 theme="vs-dark"
-                value={activeFile ? code : "# Create or select a file in the Explorer Sidebar to begin coding ⚡"}
+                value={
+                  activeFile
+                    ? code
+                    : "// Select or create a file in the explorer to start editing"
+                }
                 onChange={handleCodeChange}
                 options={editorOptions}
                 onMount={handleEditorMount}
@@ -1227,168 +1340,193 @@ function App() {
             </div>
           </section>
 
-          {/* Terminal section */}
-          <section 
-            className={`terminal-section ${isTerminalMinimized ? "minimized" : ""} ${isDraggingTerminal ? "dragging" : ""}`} 
+          <section
+            className={`panel-section ${isTerminalMinimized ? "minimized" : ""} ${isDraggingTerminal ? "dragging" : ""}`}
             style={{ height: isTerminalMinimized ? undefined : `${terminalHeight}px` }}
-            aria-label="Output Terminal"
+            aria-label="Panel"
           >
-            <div className="terminal-resizer" onMouseDown={handleResizerMouseDown} title="Drag to resize terminal panel" />
-            <div className="terminal-header">
-              <div className="terminal-tabs">
-                <div className="terminal-tab active">OUTPUT</div>
-                <div className="terminal-tab">TERMINAL</div>
-                <div className="terminal-tab">DEBUG CONSOLE</div>
-              </div>
-              <div className="terminal-controls">
+            <div
+              className="panel-resizer"
+              onMouseDown={handleResizerMouseDown}
+              title="Drag to resize"
+            />
+            <div className="panel-header">
+              <div className="panel-tabs">
                 <button
-                  className="terminal-ctrl-btn"
-                  onClick={clearTerminal}
-                  title="Clear Output"
+                  type="button"
+                  className={`panel-tab ${panelTab === "terminal" ? "active" : ""}`}
+                  onClick={() => setPanelTab("terminal")}
                 >
-                  Clear 🗑
+                  Terminal
+                </button>
+                <button type="button" className="panel-tab" disabled title="Coming soon">
+                  Problems
+                </button>
+              </div>
+              <div className="panel-controls">
+                <button type="button" className="panel-ctrl-btn" onClick={clearTerminal}>
+                  Clear
                 </button>
                 <button
-                  className="terminal-ctrl-btn toggle-btn"
-                  onClick={() => setIsTerminalMinimized(prev => !prev)}
-                  title={isTerminalMinimized ? "Restore terminal" : "Minimize terminal"}
-                  style={{ marginLeft: 8 }}
+                  type="button"
+                  className="panel-ctrl-btn"
+                  onClick={() => setIsTerminalMinimized((prev) => !prev)}
                 >
-                  {isTerminalMinimized ? "▲" : "▼"}
+                  {isTerminalMinimized ? "Expand" : "Collapse"}
                 </button>
               </div>
             </div>
-
-            <div className="terminal-body" ref={terminalBodyRef}>
-              {terminalLines.length === 0 ? (
-                <div className="terminal-empty">
-                  <span className="terminal-cursor" />
-                  Ready
-                </div>
-              ) : (
-                terminalLines.map((line, i) =>
-                  line.type === "prompt" ? (
-                    <div key={i} className="terminal-line">
-                      <span className="terminal-prompt">❯</span>
-                      <span className="terminal-output">{line.text}</span>
-                    </div>
-                  ) : (
-                    <div key={i} className="terminal-line">
-                      <span className={`terminal-output ${line.type}`}>
-                        {line.text}
-                      </span>
-                    </div>
+            {!isTerminalMinimized && (
+              <div className="terminal-body" ref={terminalBodyRef}>
+                {terminalLines.length === 0 ? (
+                  <div className="terminal-empty">Waiting for output…</div>
+                ) : (
+                  terminalLines.map((line, i) =>
+                    line.type === "prompt" ? (
+                      <div key={i} className="terminal-line">
+                        <span className="terminal-prompt">$</span>
+                        <span className="terminal-output">{line.text}</span>
+                      </div>
+                    ) : (
+                      <div key={i} className="terminal-line">
+                        <span className={`terminal-output ${line.type}`}>{line.text}</span>
+                      </div>
+                    ),
                   )
-                )
-              )}
-              <span className="terminal-cursor" />
-            </div>
+                )}
+              </div>
+            )}
           </section>
         </div>
 
-        {/* AI Assistant Chat Sidebar */}
         {isChatOpen && (
-          <aside className="ai-chat-sidebar">
-            <div className="chat-header">
-              <div className="chat-header-title">
-                <span className="chat-header-sparkle">✨</span>
-                AI ASSISTANT
-              </div>
-              <div className="chat-header-actions">
-                <span className="chat-action-dot" title="History">🕒</span>
-                <span className="chat-action-dot" title="Options">⋯</span>
-                <button 
-                  className="chat-close-btn"
-                  onClick={() => setIsChatOpen(false)}
-                  title="Close Assistant"
-                >
-                  ✕
-                </button>
-              </div>
+          <aside className="assistant-panel">
+            <div className="assistant-header">
+              <span className="assistant-title">Assistant</span>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setIsChatOpen(false)}
+                title="Close"
+              >
+                <IconClose />
+              </button>
             </div>
-
-            <div className="chat-messages-body" ref={chatBodyRef}>
+            <div className="assistant-quick-actions">
+              <button
+                type="button"
+                className="quick-action-btn"
+                disabled={isChatLoading}
+                onClick={() =>
+                  handleQuickAction(
+                    `Explain the following code clearly and concisely:\n\n${currentCodeRef.current}`,
+                  )
+                }
+              >
+                Explain
+              </button>
+              <button
+                type="button"
+                className="quick-action-btn"
+                disabled={isChatLoading}
+                onClick={() =>
+                  handleQuickAction(
+                    `Find bugs and fix this code. Return the corrected version:\n\n${currentCodeRef.current}`,
+                  )
+                }
+              >
+                Fix
+              </button>
+              <button
+                type="button"
+                className="quick-action-btn"
+                disabled={isChatLoading}
+                onClick={() =>
+                  handleQuickAction(
+                    `Generate documentation (docstrings/comments) for this code:\n\n${currentCodeRef.current}`,
+                  )
+                }
+              >
+                Docs
+              </button>
+            </div>
+            <div className="assistant-messages" ref={chatBodyRef}>
               {chatMessages.map((msg, i) => (
-                <div key={i} className={`chat-message-row ${msg.role}`}>
-                  <div className={`chat-bubble ${msg.role}`}>
-                    {msg.role === "assistant" && (
-                      <div className="chat-bubble-avatar">🤖</div>
-                    )}
-                    <div className="chat-bubble-content">
-                      {msg.content.split("\n").map((line, idx) => (
-                        <p key={idx} style={{ margin: "2px 0" }}>{line}</p>
-                      ))}
-                    </div>
+                <div key={i} className={`chat-message ${msg.role}`}>
+                  <div className="chat-message-role">
+                    {msg.role === "user" ? "You" : "Assistant"}
+                  </div>
+                  <div className="chat-message-body">
+                    {renderMessageContent(msg.content, handleCopyCode)}
                   </div>
                 </div>
               ))}
               {isChatLoading && (
-                <div className="chat-message-row assistant">
-                  <div className="chat-bubble assistant loading">
-                    <div className="chat-bubble-avatar">🤖</div>
-                    <div className="chat-loading-dots">
-                      <span>.</span><span>.</span><span>.</span>
-                    </div>
-                  </div>
+                <div className="chat-message assistant">
+                  <div className="chat-message-role">Assistant</div>
+                  <div className="chat-loading">Thinking…</div>
                 </div>
               )}
             </div>
-
-            <form className="chat-input-container" onSubmit={handleSendChatMessage}>
+            <form className="assistant-input-row" onSubmit={handleSendChatMessage}>
               <input
                 type="text"
-                className="chat-input"
+                className="assistant-input"
                 value={chatInputValue}
                 onChange={(e) => setChatInputValue(e.target.value)}
-                placeholder="Ask anything about your code..."
+                placeholder="Ask about your code… (Ctrl+Enter to send)"
                 disabled={isChatLoading}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    handleSendChatMessage(e);
+                  }
+                }}
               />
-              <button 
-                type="submit" 
-                className="chat-send-btn" 
+              <button
+                type="submit"
+                className="assistant-send"
                 disabled={!chatInputValue.trim() || isChatLoading}
-                title="Send Message"
               >
-                ➔
+                Send
               </button>
             </form>
-            <div className="chat-footer-note">
-              AI can make mistakes. Check important info.
-            </div>
+            <p className="assistant-footer">AI can make mistakes. Verify important changes.</p>
           </aside>
         )}
       </div>
 
-      {/* ── Status Bar ── */}
       <footer className="status-bar">
         <div className="status-left">
-          <span className="status-notification error">
-            <span className="notification-icon">⊗</span> 0
-          </span>
-          <span className="status-notification warning">
-            <span className="notification-icon">⚠</span> 0
-          </span>
-          <span className="status-divider">|</span>
-          <div className="status-item">
-            {isRunning
-              ? "⏳ Process running..."
-              : isSyncing
-                ? "⟳ AI suggesting..."
-                : hasGhost
-                  ? "✦ Suggestion ready (Tab to accept)"
-                  : "✓ Ready"}
-          </div>
+          <span className="status-item">{statusMessage}</span>
         </div>
         <div className="status-right">
-          <div className="status-item">Ln {code.split("\n").length}, Col 1</div>
-          <div className="status-item">Spaces: 2</div>
-          <div className="status-item">UTF-8</div>
-          <div className="status-item">LF</div>
-          <div className="status-item lang-label">{getLanguageLabel(activeFile)}</div>
-          <span className="status-divider">|</span>
-          <div className="status-item settings-trigger" onClick={() => setIsSidebarOpen(prev => !prev)}>
-            ⚙ Settings
-          </div>
+          {activeFile && (
+            <>
+              <span className="status-item">
+                Ln {cursorPosition.line}, Col {cursorPosition.column}
+              </span>
+              <span className="status-item">Spaces: 2</span>
+              <span className="status-item">UTF-8</span>
+              <span className="status-item">LF</span>
+              <span className="status-item">{getLanguageLabel(activeFile)}</span>
+            </>
+          )}
+          <span
+            className={`status-item clickable ${isChatOpen ? "active" : ""}`}
+            onClick={() => setIsChatOpen((prev) => !prev)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setIsChatOpen((prev) => !prev);
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            title="Toggle assistant"
+            aria-pressed={isChatOpen}
+          >
+            Assistant
+          </span>
         </div>
       </footer>
     </div>
