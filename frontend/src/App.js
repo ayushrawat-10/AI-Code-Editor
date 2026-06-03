@@ -1068,7 +1068,159 @@ function App() {
       );
       inlineProviderRef.current = providers;
 
-      // Tab → accept our suggestion (works even if Monaco hasn't shown ghost text yet)
+      // ── Completion item providers (dropdown IntelliSense) ────────────────────
+      // Monaco handles JS/TS/HTML/CSS natively. We add Python, C, C++, Rust below.
+      const CK = monaco.languages.CompletionItemKind;
+
+      const makeSuggestions = (language, items) =>
+        monaco.languages.registerCompletionItemProvider(language, {
+          provideCompletionItems(model, position) {
+            const word = model.getWordUntilPosition(position);
+            const range = {
+              startLineNumber: position.lineNumber,
+              endLineNumber: position.lineNumber,
+              startColumn: word.startColumn,
+              endColumn: word.endColumn,
+            };
+            return { suggestions: items.map(s => ({ ...s, range })) };
+          },
+        });
+
+      // ── Python ──
+      const pyKeywords = [
+        "False","None","True","and","as","assert","async","await",
+        "break","class","continue","def","del","elif","else","except",
+        "finally","for","from","global","if","import","in","is",
+        "lambda","nonlocal","not","or","pass","raise","return","try",
+        "while","with","yield",
+      ];
+      const pyBuiltins = [
+        "abs","all","any","ascii","bin","bool","bytearray","bytes",
+        "callable","chr","compile","complex","delattr","dict","dir",
+        "divmod","enumerate","eval","exec","filter","float","format",
+        "frozenset","getattr","globals","hasattr","hash","help","hex",
+        "id","input","int","isinstance","issubclass","iter","len",
+        "list","locals","map","max","memoryview","min","next","object",
+        "oct","open","ord","pow","print","property","range","repr",
+        "reversed","round","set","setattr","slice","sorted","staticmethod",
+        "str","sum","super","tuple","type","vars","zip",
+      ];
+      const pySnippets = [
+        { label: "def", kind: CK.Snippet, insertText: "def ${1:name}(${2:args}):\n\t${3:pass}", insertTextRules: 4, detail: "Define function" },
+        { label: "class", kind: CK.Snippet, insertText: "class ${1:Name}:\n\tdef __init__(self${2:, args}):\n\t\t${3:pass}", insertTextRules: 4, detail: "Define class" },
+        { label: "if", kind: CK.Snippet, insertText: "if ${1:condition}:\n\t${2:pass}", insertTextRules: 4, detail: "If statement" },
+        { label: "for", kind: CK.Snippet, insertText: "for ${1:item} in ${2:iterable}:\n\t${3:pass}", insertTextRules: 4, detail: "For loop" },
+        { label: "while", kind: CK.Snippet, insertText: "while ${1:condition}:\n\t${2:pass}", insertTextRules: 4, detail: "While loop" },
+        { label: "try", kind: CK.Snippet, insertText: "try:\n\t${1:pass}\nexcept ${2:Exception} as e:\n\t${3:raise}", insertTextRules: 4, detail: "Try/except" },
+        { label: "with", kind: CK.Snippet, insertText: "with ${1:open('file')} as ${2:f}:\n\t${3:pass}", insertTextRules: 4, detail: "With statement" },
+        { label: "lambda", kind: CK.Snippet, insertText: "lambda ${1:x}: ${2:x}", insertTextRules: 4, detail: "Lambda expression" },
+        { label: "list comprehension", kind: CK.Snippet, insertText: "[${1:expr} for ${2:item} in ${3:iterable}]", insertTextRules: 4, detail: "List comprehension" },
+        { label: "dict comprehension", kind: CK.Snippet, insertText: "{${1:k}: ${2:v} for ${3:k}, ${4:v} in ${5:items}}", insertTextRules: 4, detail: "Dict comprehension" },
+        { label: "print", kind: CK.Snippet, insertText: "print(${1:'Hello, World!'})", insertTextRules: 4, detail: "print(...)" },
+        { label: "import", kind: CK.Snippet, insertText: "import ${1:module}", insertTextRules: 4, detail: "Import module" },
+        { label: "from import", kind: CK.Snippet, insertText: "from ${1:module} import ${2:name}", insertTextRules: 4, detail: "From...import" },
+        { label: "main guard", kind: CK.Snippet, insertText: "if __name__ == '__main__':\n\t${1:main()}", insertTextRules: 4, detail: "__main__ guard" },
+      ];
+      const pyItems = [
+        ...pyKeywords.map(kw => ({ label: kw, kind: CK.Keyword, insertText: kw, detail: "keyword" })),
+        ...pyBuiltins.map(fn => ({ label: fn, kind: CK.Function, insertText: fn, detail: "built-in" })),
+        ...pySnippets,
+      ];
+      makeSuggestions("python", pyItems);
+
+      // ── C ──
+      const cKeywords = [
+        "auto","break","case","char","const","continue","default","do",
+        "double","else","enum","extern","float","for","goto","if",
+        "inline","int","long","register","restrict","return","short",
+        "signed","sizeof","static","struct","switch","typedef","union",
+        "unsigned","void","volatile","while","NULL","true","false",
+      ];
+      const cSnippets = [
+        { label: "#include stdio", kind: CK.Snippet, insertText: "#include <stdio.h>", insertTextRules: 4, detail: "Include stdio.h" },
+        { label: "#include stdlib", kind: CK.Snippet, insertText: "#include <stdlib.h>", insertTextRules: 4, detail: "Include stdlib.h" },
+        { label: "#include string", kind: CK.Snippet, insertText: "#include <string.h>", insertTextRules: 4, detail: "Include string.h" },
+        { label: "main", kind: CK.Snippet, insertText: "int main(int argc, char *argv[]) {\n\t${1:return 0;}\n}", insertTextRules: 4, detail: "main function" },
+        { label: "printf", kind: CK.Snippet, insertText: "printf(\"${1:%s}\\n\", ${2:args});", insertTextRules: 4, detail: "printf(...)" },
+        { label: "scanf", kind: CK.Snippet, insertText: "scanf(\"${1:%d}\", &${2:var});", insertTextRules: 4, detail: "scanf(...)" },
+        { label: "for", kind: CK.Snippet, insertText: "for (int ${1:i} = 0; ${1:i} < ${2:n}; ${1:i}++) {\n\t${3}\n}", insertTextRules: 4, detail: "For loop" },
+        { label: "while", kind: CK.Snippet, insertText: "while (${1:condition}) {\n\t${2}\n}", insertTextRules: 4, detail: "While loop" },
+        { label: "if", kind: CK.Snippet, insertText: "if (${1:condition}) {\n\t${2}\n}", insertTextRules: 4, detail: "If statement" },
+        { label: "struct", kind: CK.Snippet, insertText: "struct ${1:Name} {\n\t${2:int x;}\n};", insertTextRules: 4, detail: "Struct definition" },
+        { label: "malloc", kind: CK.Snippet, insertText: "${1:int} *${2:ptr} = (${1:int}*)malloc(${3:n} * sizeof(${1:int}));", insertTextRules: 4, detail: "malloc allocation" },
+      ];
+      makeSuggestions("c", [
+        ...cKeywords.map(kw => ({ label: kw, kind: CK.Keyword, insertText: kw })),
+        ...cSnippets,
+      ]);
+
+      // ── C++ ──
+      const cppExtra = [
+        "auto","bool","catch","class","const_cast","delete","dynamic_cast",
+        "explicit","export","false","friend","mutable","namespace","new",
+        "nullptr","operator","private","protected","public","reinterpret_cast",
+        "static_cast","template","this","throw","true","try","typeid",
+        "typename","using","virtual","override","final","noexcept","constexpr",
+        "decltype","auto","string","vector","map","set","unordered_map",
+        "unordered_set","pair","tuple","optional","variant","unique_ptr",
+        "shared_ptr","weak_ptr","make_unique","make_shared",
+      ];
+      const cppSnippets = [
+        { label: "#include iostream", kind: CK.Snippet, insertText: "#include <iostream>", insertTextRules: 4, detail: "Include iostream" },
+        { label: "#include vector", kind: CK.Snippet, insertText: "#include <vector>", insertTextRules: 4, detail: "Include vector" },
+        { label: "#include string", kind: CK.Snippet, insertText: "#include <string>", insertTextRules: 4, detail: "Include string" },
+        { label: "#include algorithm", kind: CK.Snippet, insertText: "#include <algorithm>", insertTextRules: 4, detail: "Include algorithm" },
+        { label: "using namespace std", kind: CK.Snippet, insertText: "using namespace std;", insertTextRules: 4, detail: "Using namespace std" },
+        { label: "cout", kind: CK.Snippet, insertText: "std::cout << ${1:\"Hello\"} << std::endl;", insertTextRules: 4, detail: "cout print" },
+        { label: "cin", kind: CK.Snippet, insertText: "std::cin >> ${1:var};", insertTextRules: 4, detail: "cin input" },
+        { label: "main", kind: CK.Snippet, insertText: "int main() {\n\t${1:return 0;}\n}", insertTextRules: 4, detail: "main function" },
+        { label: "class", kind: CK.Snippet, insertText: "class ${1:Name} {\npublic:\n\t${1:Name}() {}\n\t~${1:Name}() {}\n};", insertTextRules: 4, detail: "Class definition" },
+        { label: "for range", kind: CK.Snippet, insertText: "for (const auto& ${1:item} : ${2:container}) {\n\t${3}\n}", insertTextRules: 4, detail: "Range-based for" },
+        { label: "vector", kind: CK.Snippet, insertText: "std::vector<${1:int}> ${2:v};", insertTextRules: 4, detail: "std::vector" },
+        { label: "lambda", kind: CK.Snippet, insertText: "[${1:capture}](${2:args}) -> ${3:void} {\n\t${4}\n}", insertTextRules: 4, detail: "Lambda expression" },
+        { label: "unique_ptr", kind: CK.Snippet, insertText: "auto ${1:ptr} = std::make_unique<${2:Type}>(${3:args});", insertTextRules: 4, detail: "unique_ptr" },
+      ];
+      makeSuggestions("cpp", [
+        ...cKeywords.map(kw => ({ label: kw, kind: CK.Keyword, insertText: kw })),
+        ...cppExtra.map(kw => ({ label: kw, kind: CK.Keyword, insertText: kw })),
+        ...cSnippets,
+        ...cppSnippets,
+      ]);
+
+      // ── Rust ──
+      const rustKeywords = [
+        "as","async","await","break","const","continue","crate","dyn",
+        "else","enum","extern","false","fn","for","if","impl","in",
+        "let","loop","match","mod","move","mut","pub","ref","return",
+        "self","Self","static","struct","super","trait","true","type",
+        "union","unsafe","use","where","while",
+        "i8","i16","i32","i64","i128","isize",
+        "u8","u16","u32","u64","u128","usize",
+        "f32","f64","bool","char","str","String","Vec","Option","Result",
+        "Some","None","Ok","Err","Box","Rc","Arc","Mutex","HashMap",
+      ];
+      const rustSnippets = [
+        { label: "fn", kind: CK.Snippet, insertText: "fn ${1:name}(${2:args}) -> ${3:()} {\n\t${4}\n}", insertTextRules: 4, detail: "Function" },
+        { label: "fn main", kind: CK.Snippet, insertText: "fn main() {\n\t${1:println!(\"Hello, World!\");}\n}", insertTextRules: 4, detail: "main function" },
+        { label: "println", kind: CK.Snippet, insertText: "println!(\"${1:{}}\", ${2:val});", insertTextRules: 4, detail: "println! macro" },
+        { label: "let", kind: CK.Snippet, insertText: "let ${1:name} = ${2:value};", insertTextRules: 4, detail: "Immutable binding" },
+        { label: "let mut", kind: CK.Snippet, insertText: "let mut ${1:name} = ${2:value};", insertTextRules: 4, detail: "Mutable binding" },
+        { label: "struct", kind: CK.Snippet, insertText: "struct ${1:Name} {\n\t${2:field}: ${3:Type},\n}", insertTextRules: 4, detail: "Struct definition" },
+        { label: "enum", kind: CK.Snippet, insertText: "enum ${1:Name} {\n\t${2:Variant},\n}", insertTextRules: 4, detail: "Enum definition" },
+        { label: "impl", kind: CK.Snippet, insertText: "impl ${1:Type} {\n\t${2}\n}", insertTextRules: 4, detail: "impl block" },
+        { label: "trait", kind: CK.Snippet, insertText: "trait ${1:Name} {\n\tfn ${2:method}(&self);\n}", insertTextRules: 4, detail: "Trait definition" },
+        { label: "match", kind: CK.Snippet, insertText: "match ${1:expr} {\n\t${2:_} => ${3:()},\n}", insertTextRules: 4, detail: "Match expression" },
+        { label: "for", kind: CK.Snippet, insertText: "for ${1:item} in ${2:iter} {\n\t${3}\n}", insertTextRules: 4, detail: "For loop" },
+        { label: "if let", kind: CK.Snippet, insertText: "if let ${1:Some(val)} = ${2:expr} {\n\t${3}\n}", insertTextRules: 4, detail: "if let" },
+        { label: "vec!", kind: CK.Snippet, insertText: "vec![${1:1, 2, 3}]", insertTextRules: 4, detail: "vec! macro" },
+        { label: "use", kind: CK.Snippet, insertText: "use ${1:std::collections::HashMap};", insertTextRules: 4, detail: "use statement" },
+      ];
+      makeSuggestions("rust", [
+        ...rustKeywords.map(kw => ({ label: kw, kind: CK.Keyword, insertText: kw })),
+        ...rustSnippets,
+      ]);
+
+      // Tab → accept AI ghost text (only when ghost text is active; otherwise dropdown handles Tab)
       editor.onKeyDown((e) => {
         if (e.keyCode === monaco.KeyCode.Tab && ghostTextRef.current) {
           e.preventDefault();
