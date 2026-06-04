@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import Editor from "@monaco-editor/react";
 import "./App.css";
+import LandingPage from "./LandingPage";
 import { buildFileTree, getSortedChildren, getAllFolderPaths, getBaseName } from "./fileTree";
 import {
   IconFiles,
@@ -308,6 +309,7 @@ async function streamSuggestion(code, filename, onToken, onDone, signal) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 function App() {
+  const [showLanding, setShowLanding] = useState(true);
   const [files, setFiles] = useState({
     "main.py": DEFAULT_CODE
   });
@@ -1517,12 +1519,24 @@ function App() {
       return renderFileItem(node.fullPath, depth);
     });
 
+  if (showLanding) {
+    return <LandingPage onStart={() => setShowLanding(false)} />;
+  }
+
   return (
     <div className="app-shell">
 
       <header className="titlebar">
         <div className="titlebar-left">
-          <span className="app-brand">CodeLab</span>
+          <span 
+            className="app-brand" 
+            style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }} 
+            onClick={() => setShowLanding(true)} 
+            title="Return to Home Screen"
+          >
+            <span style={{ width: "6px", height: "6px", background: "var(--accent)", borderRadius: "50%", boxShadow: "0 0 6px var(--accent)" }}></span>
+            CodeLab
+          </span>
           <nav className="titlebar-menu" aria-label="Main menu">
             <button type="button" className="menu-item" onClick={handleSaveFile} title="Save file">
               File
